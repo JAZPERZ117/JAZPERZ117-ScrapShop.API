@@ -8,6 +8,7 @@
 ![JWT](https://img.shields.io/badge/auth-JWT-000000?logo=jsonwebtokens&logoColor=white)
 ![POS](https://img.shields.io/badge/type-POS%20%2F%20inventory-orange)
 ![Thai language](https://img.shields.io/badge/language-Thai-red)
+![Branch protection](https://img.shields.io/badge/main%20branch-protected-success?logo=github)
 
 ระบบจัดการร้านรับซื้อของเก่า (scrap-buying shop) แบบครบวงจร ใช้งานเป็นภาษาไทยทั้งหมด ครอบคลุมตั้งแต่รับซื้อของหน้าร้าน ออกใบเสร็จ จัดการลูกค้า/สินค้า/สต็อก ไปจนถึงเงินเดือนพนักงานและรายงานสรุปยอด/ภาษี
 
@@ -87,6 +88,14 @@ server/
   src/seed.js   สคริปต์สร้างบัญชี admin เริ่มต้น
 .claude/skills/audit-and-fix/  สกิลสำหรับตรวจสอบบั๊กที่พบซ้ำๆ ในโปรเจกต์นี้อัตโนมัติ (เรียกด้วย `/audit-and-fix`)
 ```
+
+## การป้องกัน branch `main`
+
+`main` ตั้งค่า branch protection ไว้แล้ว บังคับใช้กับทุกคนรวมถึงเจ้าของ repo ด้วย:
+
+- ต้อง merge ผ่าน Pull Request เท่านั้น ห้าม push เข้า `main` โดยตรง
+- ห้าม force-push
+- ห้ามลบ branch
 
 ## หมายเหตุเรื่องข้อมูล
 
