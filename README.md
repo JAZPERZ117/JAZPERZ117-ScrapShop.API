@@ -9,6 +9,7 @@
 ![POS](https://img.shields.io/badge/type-POS%20%2F%20inventory-orange)
 ![Thai language](https://img.shields.io/badge/language-Thai-red)
 ![Branch protection](https://img.shields.io/badge/main%20branch-protected-success?logo=github)
+![License](https://img.shields.io/badge/license-All%20Rights%20Reserved-lightgrey)
 
 ระบบจัดการร้านรับซื้อของเก่า (scrap-buying shop) แบบครบวงจร ใช้งานเป็นภาษาไทยทั้งหมด ครอบคลุมตั้งแต่รับซื้อของหน้าร้าน ออกใบเสร็จ จัดการลูกค้า/สินค้า/สต็อก ไปจนถึงเงินเดือนพนักงานและรายงานสรุปยอด/ภาษี
 
@@ -100,3 +101,7 @@ server/
 ## หมายเหตุเรื่องข้อมูล
 
 ข้อมูลธุรกิจ (สินค้า ลูกค้า ใบเสร็จ ฯลฯ) ทั้งหมดเก็บใน `localStorage` ของเบราว์เซอร์ ไม่ได้เก็บลงฐานข้อมูลฝั่งเซิร์ฟเวอร์ — ฐานข้อมูล SQLite (`server/shop.db`) ใช้เก็บเฉพาะบัญชีผู้ใช้งานสำหรับยืนยันตัวตนเท่านั้น
+
+## License
+
+สงวนลิขสิทธิ์ทั้งหมด (All Rights Reserved) — ดูรายละเอียดที่ [LICENSE](./LICENSE) ไม่อนุญาตให้นำโค้ดไปใช้/แก้ไข/แจกจ่ายโดยไม่ได้รับอนุญาตเป็นลายลักษณ์อักษร
