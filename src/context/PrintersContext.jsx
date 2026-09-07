@@ -12,14 +12,14 @@ const PrintersContext = createContext(null);
 
 export function PrintersProvider({ children }) {
   const [printers, setPrinters] = usePersistentState('scrapshop_printers', INITIAL_PRINTERS);
-  const [order] = usePersistentState('scrapshop_printers_order', INITIAL_ORDER);
+  const [order, setOrder] = usePersistentState('scrapshop_printers_order', INITIAL_ORDER);
 
   function toggleConnected(id) {
     setPrinters((prev) => ({ ...prev, [id]: { ...prev[id], connected: !prev[id].connected } }));
   }
 
   return (
-    <PrintersContext.Provider value={{ printers, setPrinters, order, toggleConnected }}>
+    <PrintersContext.Provider value={{ printers, setPrinters, order, setOrder, toggleConnected }}>
       {children}
     </PrintersContext.Provider>
   );
