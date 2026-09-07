@@ -1,5 +1,14 @@
 # ScrapShop — ระบบจัดการร้านรับซื้อของเก่า
 
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
+![Express](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite&logoColor=white)
+![Vitest](https://img.shields.io/badge/tested%20with-Vitest-6E9F18?logo=vitest&logoColor=white)
+![JWT](https://img.shields.io/badge/auth-JWT-000000?logo=jsonwebtokens&logoColor=white)
+![POS](https://img.shields.io/badge/type-POS%20%2F%20inventory-orange)
+![Thai language](https://img.shields.io/badge/language-Thai-red)
+
 ระบบจัดการร้านรับซื้อของเก่า (scrap-buying shop) แบบครบวงจร ใช้งานเป็นภาษาไทยทั้งหมด ครอบคลุมตั้งแต่รับซื้อของหน้าร้าน ออกใบเสร็จ จัดการลูกค้า/สินค้า/สต็อก ไปจนถึงเงินเดือนพนักงานและรายงานสรุปยอด/ภาษี
 
 ## เทคโนโลยีที่ใช้
