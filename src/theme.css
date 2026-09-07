@@ -1,0 +1,98 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100vh;
+}
+
+html,
+body,
+#root {
+  background: var(--bg);
+  color: var(--ink-900);
+}
+
+body {
+  font-family: 'Sarabun', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: background 0.15s, color 0.15s;
+}
+
+:root {
+  --green-900: #123227;
+  --green-800: #164430;
+  --green-700: #1b7a4d;
+  --green-600: #1f9d5c;
+  --green-500: #2cb868;
+  --green-100: #e4f6eb;
+  --green-50: #f1faf4;
+  --bg: #f5f7f6;
+  --card: #ffffff;
+  --border: #e6eae7;
+  --ink-900: #152420;
+  --ink-700: #3d4a45;
+  --ink-500: #78857f;
+  --ink-300: #aab4af;
+  --amber: #b8720a;
+  --amber-bg: #fdf3e2;
+  --blue: #2d6fe0;
+  --blue-bg: #eaf1fe;
+  --plum: #8b4fd8;
+  --plum-bg: #f3ebfc;
+  --rose: #d8477a;
+  --rose-bg: #fceaf1;
+  --teal: #0e8e82;
+  --teal-bg: #e4f6f4;
+  /* Fixed dark-green fill for solid badges/buttons paired with hardcoded white text
+     (e.g. the sidebar shop pill, primary-button hover). Deliberately NOT overridden
+     in dark mode below — --green-800/900 above double as adaptive text-emphasis
+     colors that DO need to invert, so solid fills use these separate stable tokens
+     instead of also inverting (which would turn white-on-white and disappear). */
+  --green-solid-800: #164430;
+  --green-solid-900: #123227;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgba(18, 50, 39, 0.04), 0 1px 12px rgba(18, 50, 39, 0.05);
+}
+
+/* ===== Night mode — toggled from ตั้งค่าระบบ (Settings), applied to <html data-theme> ===== */
+[data-theme='dark'] {
+  --green-900: #eaf7ef;
+  --green-800: #d7f2e0;
+  --green-700: #6fe3a0;
+  --green-600: #3ecf82;
+  --green-500: #2cb868;
+  --green-100: rgba(62, 207, 130, 0.16);
+  --green-50: rgba(62, 207, 130, 0.08);
+  --bg: #12181a;
+  --card: #1b2326;
+  --border: #2a3336;
+  --ink-900: #eef2f0;
+  --ink-700: #c3cbc7;
+  --ink-500: #8b9691;
+  --ink-300: #4b5552;
+  --amber: #e3a53f;
+  --amber-bg: rgba(227, 165, 63, 0.16);
+  --blue: #6ea2ff;
+  --blue-bg: rgba(110, 162, 255, 0.16);
+  --plum: #bd8ef0;
+  --plum-bg: rgba(189, 142, 240, 0.16);
+  --rose: #f087ab;
+  --rose-bg: rgba(240, 135, 171, 0.16);
+  --teal: #4fd0c2;
+  --teal-bg: rgba(79, 208, 194, 0.16);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 12px rgba(0, 0, 0, 0.35);
+}
+
+h1,
+h2,
+h3,
+.num,
+.brand-name {
+  font-family: 'Kanit', sans-serif;
+}

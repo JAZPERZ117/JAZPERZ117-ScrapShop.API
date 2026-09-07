@@ -1,0 +1,176 @@
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 350px;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.doc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-bottom: 20px;
+}
+@media (max-width: 900px) {
+  .doc-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.doc-card {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  cursor: pointer;
+  transition: 0.15s;
+  background: var(--card);
+  display: flex;
+  gap: 13px;
+  align-items: flex-start;
+}
+.doc-card:hover {
+  border-color: var(--ink-300);
+}
+.doc-card.selected {
+  border-color: var(--green-600);
+  background: var(--green-50);
+  box-shadow: 0 0 0 3px rgba(44, 184, 104, 0.12);
+}
+.doc-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.doc-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.doc-mid {
+  flex: 1;
+  min-width: 0;
+}
+.doc-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+.doc-desc {
+  font-size: 11.5px;
+  color: var(--ink-500);
+  margin-top: 2px;
+  line-height: 1.5;
+}
+.doc-meta {
+  font-size: 11px;
+  color: var(--ink-300);
+  margin-top: 8px;
+}
+.doc-print-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--ink-500);
+  cursor: pointer;
+}
+.doc-print-btn:hover {
+  background: var(--green-solid-800);
+  border-color: var(--green-solid-800);
+  color: #fff;
+}
+.doc-print-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.stepper-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--ink-700);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.stepper-val {
+  flex: 1;
+  text-align: center;
+  font-family: 'Kanit', sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.printer-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.printer-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.printer-opt.selected {
+  border-color: var(--green-600);
+  background: var(--green-50);
+}
+.printer-opt svg {
+  width: 17px;
+  height: 17px;
+  color: var(--ink-500);
+  flex-shrink: 0;
+}
+.printer-opt.selected svg {
+  color: var(--green-700);
+}
+.printer-opt-mid {
+  flex: 1;
+  min-width: 0;
+}
+.printer-opt-name {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.printer-opt-sub {
+  font-size: 10.5px;
+  color: var(--ink-500);
+}
+.printer-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--green-500);
+  flex-shrink: 0;
+}
+.printer-opt.offline {
+  opacity: 0.7;
+}
+.printer-opt.offline .printer-dot {
+  background: var(--ink-300, var(--border));
+}

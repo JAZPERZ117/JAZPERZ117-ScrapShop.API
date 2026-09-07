@@ -1,0 +1,89 @@
+.rc-no {
+  font-family: 'Kanit', sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+}
+.rc-time {
+  font-size: 11.5px;
+  color: var(--ink-500);
+  margin-top: 1px;
+}
+
+.receipt-shell {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.receipt-shell-head {
+  padding: 16px 20px 0;
+}
+.receipt-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.receipt-title-row .card-title {
+  margin: 0;
+}
+
+.receipt-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 0 20px 20px;
+}
+.action-row {
+  display: flex;
+  gap: 9px;
+}
+.action-row .btn {
+  flex: 1;
+  justify-content: center;
+  padding: 10px;
+}
+
+.paper.edit-mode {
+  padding: 16px 20px;
+}
+.edit-item-row {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--card);
+}
+.edit-item-sub {
+  display: flex;
+  gap: 8px;
+}
+.edit-item-sub .input-plain {
+  flex: 1;
+  min-width: 0;
+}
+.edit-item-remove {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 9px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rose);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.edit-item-remove svg {
+  width: 15px;
+  height: 15px;
+}
+.edit-item-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

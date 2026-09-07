@@ -1,0 +1,338 @@
+.item-table {
+  margin-top: 18px;
+  width: 100%;
+  border-collapse: collapse;
+}
+.item-table thead th {
+  text-align: left;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-500);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.item-table td {
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.item-table tr:last-child td {
+  border-bottom: none;
+}
+.cell-select {
+  width: 100%;
+  min-width: 120px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: 'Sarabun', sans-serif;
+  background: var(--bg);
+  color: var(--ink-700);
+}
+.cell-select:focus {
+  outline: 2px solid var(--green-500);
+  outline-offset: 1px;
+  border-color: transparent;
+  background: var(--card);
+}
+.cell-input {
+  width: 82px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: 'Sarabun', sans-serif;
+  text-align: right;
+  background: var(--bg);
+  color: var(--ink-700);
+}
+.cell-input:focus {
+  outline: 2px solid var(--green-500);
+  outline-offset: 1px;
+  border-color: transparent;
+  background: var(--card);
+}
+.unit {
+  font-size: 11.5px;
+  color: var(--ink-500);
+  margin-left: 4px;
+}
+.row-total {
+  font-family: 'Kanit', sans-serif;
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.row-del {
+  color: var(--ink-300);
+  cursor: pointer;
+  padding: 5px;
+  border-radius: 6px;
+  width: fit-content;
+}
+.row-del:hover {
+  color: var(--rose);
+  background: var(--rose-bg);
+}
+.row-del svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+.empty-row {
+  text-align: center;
+  color: var(--ink-500);
+  font-size: 12.5px;
+  padding: 20px 8px;
+}
+.add-row-btn {
+  margin-top: 12px;
+  width: 100%;
+  padding: 11px;
+  border: 1.5px dashed var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-500);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-family: 'Sarabun', sans-serif;
+}
+.add-row-btn:hover {
+  border-color: var(--green-500);
+  color: var(--green-700);
+  background: var(--green-50);
+}
+.add-row-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.delivery-form-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--green-50);
+  font-size: 13px;
+  color: var(--ink-700);
+}
+.delivery-form-total b {
+  font-family: 'Kanit', sans-serif;
+  font-size: 17px;
+  color: var(--green-800);
+}
+
+.paper.edit-mode {
+  padding: 16px 20px;
+}
+.edit-item-row {
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--card);
+}
+.edit-item-sub {
+  display: flex;
+  gap: 8px;
+}
+.edit-item-sub .input-plain {
+  flex: 1;
+  min-width: 0;
+}
+.edit-item-remove {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: 9px;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--rose);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.edit-item-remove svg {
+  width: 15px;
+  height: 15px;
+}
+.edit-item-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The compact on-screen preview is not what gets printed — the dedicated .a4-doc
+   invoice layout below is — so it must not also turn print-visible via the global
+   ".paper, .paper *" print rule. */
+@media print {
+  .delivery-screen-preview,
+  .delivery-screen-preview * {
+    display: none !important;
+  }
+}
+
+/* ===== printed ใบส่งสินค้า/ใบกำกับภาษี layout ===== */
+.inv-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.inv-head-left {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.inv-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--green-100);
+  color: var(--green-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.inv-logo svg {
+  width: 24px;
+  height: 24px;
+}
+.inv-company-name {
+  font-family: 'Kanit', sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+}
+.inv-company-addr,
+.inv-company-contact {
+  font-size: 11.5px;
+  color: var(--ink-500);
+  margin-top: 2px;
+  max-width: 320px;
+}
+.inv-head-right {
+  text-align: right;
+  flex-shrink: 0;
+}
+.inv-doc-badge {
+  display: inline-block;
+  background: var(--blue-bg);
+  color: var(--blue);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 8px;
+}
+.inv-doc-copy {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-500);
+}
+.inv-taxid-row {
+  margin-top: 8px;
+  font-size: 11.5px;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.inv-taxid-row b {
+  font-family: 'Kanit', sans-serif;
+}
+.inv-meta-box {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.inv-meta-col {
+  padding: 12px 14px;
+}
+.inv-meta-col-right {
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+.inv-meta-label {
+  font-size: 11px;
+  color: var(--ink-500);
+  margin-bottom: 4px;
+}
+.inv-meta-value {
+  font-family: 'Kanit', sans-serif;
+  font-weight: 600;
+  font-size: 13px;
+}
+.inv-meta-sub {
+  font-size: 11.5px;
+  color: var(--ink-500);
+  margin-top: 2px;
+}
+.inv-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  padding: 2px 0;
+}
+.inv-meta-row b {
+  font-family: 'Kanit', sans-serif;
+}
+.inv-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-top: 10px;
+}
+.inv-note {
+  font-size: 11.5px;
+  color: var(--ink-700);
+  margin-bottom: 8px;
+}
+.inv-words-box {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 280px;
+}
+.inv-totals {
+  min-width: 220px;
+}
+.inv-sign-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 48px;
+}
+.inv-sign-box {
+  flex: 1;
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-700);
+}
+.inv-sign-line {
+  border-bottom: 1px dashed var(--ink-300);
+  margin: 32px 12px 8px;
+}
+.inv-sign-date {
+  font-size: 11px;
+  color: var(--ink-500);
+}

@@ -1,0 +1,18 @@
+.rank-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink-500);
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Kanit', sans-serif;
+  flex-shrink: 0;
+}
+.rank-num.top {
+  background: var(--green-solid-800);
+  color: #fff;
+}
