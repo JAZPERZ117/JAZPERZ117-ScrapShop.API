@@ -12,7 +12,11 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'jsdom',
+    // happy-dom instead of jsdom — jsdom's bundled undici crashes instantiating its
+    // CacheStorage global under Linux CI runners (a known jsdom/Node compatibility bug
+    // unrelated to anything this test suite actually exercises); happy-dom sidesteps it
+    // entirely and is the standard alternative for Vitest.
+    environment: 'happy-dom',
     globals: true,
     setupFiles: './src/test/setup.js',
   },
