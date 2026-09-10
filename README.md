@@ -36,6 +36,8 @@
 
 ### 1. ติดตั้ง dependencies
 
+`server/` ใช้ `better-sqlite3` ซึ่งต้อง compile native module ตอนติดตั้ง — เครื่องต้องมี Python 3 และ build tools ของ node-gyp พร้อมอยู่ก่อน (บน Windows คือ Python 3 + Visual Studio Build Tools; ถ้าไม่มีจะเจอ error แบบ "find Python ... could not be run" ตอน `npm install`/`npm ci`)
+
 ```bash
 npm install
 cd server && npm install
@@ -43,11 +45,12 @@ cd server && npm install
 
 ### 2. ตั้งค่า backend
 
-สร้างไฟล์ `server/.env` (ไม่ถูก commit เข้า git):
+คัดลอก `server/.env.example` เป็น `server/.env` (ไฟล์นี้ไม่ถูก commit เข้า git) แล้วใส่ค่าจริง:
 
-```env
-PORT=4000
-JWT_SECRET=<สุ่มค่าเองด้วย เช่น node -e "console.log(require('crypto').randomBytes(48).toString('hex'))">
+```bash
+cd server
+cp .env.example .env
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"   # ใช้ผลลัพธ์นี้เป็น JWT_SECRET ใน .env
 ```
 
 สร้างบัญชี admin เริ่มต้น (username `admin` / password `shop1234` — **ควรเปลี่ยนรหัสผ่านทันทีหลังล็อกอินครั้งแรก**):
