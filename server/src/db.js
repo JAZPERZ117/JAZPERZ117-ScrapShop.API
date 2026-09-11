@@ -1,7 +1,9 @@
 const path = require('path');
-const Database = require('better-sqlite3');
+// Node's built-in SQLite instead of better-sqlite3 — same synchronous prepare/get/run API,
+// but needs no native module compilation (no Python/C++ toolchain required to `npm install`).
+const { DatabaseSync } = require('node:sqlite');
 
-const db = new Database(path.join(__dirname, '..', 'shop.db'));
+const db = new DatabaseSync(path.join(__dirname, '..', 'shop.db'));
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (

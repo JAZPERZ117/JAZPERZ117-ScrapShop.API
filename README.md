@@ -3,7 +3,7 @@
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
 ![Express](https://img.shields.io/badge/Express-5-000000?logo=express&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-better--sqlite3-003B57?logo=sqlite&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-node%3Asqlite-003B57?logo=sqlite&logoColor=white)
 ![Vitest](https://img.shields.io/badge/tested%20with-Vitest-6E9F18?logo=vitest&logoColor=white)
 ![JWT](https://img.shields.io/badge/auth-JWT-000000?logo=jsonwebtokens&logoColor=white)
 ![POS](https://img.shields.io/badge/type-POS%20%2F%20inventory-orange)
@@ -16,7 +16,7 @@
 ## เทคโนโลยีที่ใช้
 
 - **Frontend**: React 19 + Vite, React Router, state ผูกกับ `localStorage` ผ่าน React Context ต่อโดเมน (ไม่ใช้ backend database สำหรับข้อมูลธุรกิจ)
-- **Backend** (`server/`): Express + better-sqlite3 — ใช้เฉพาะสำหรับยืนยันตัวตนของบัญชี "เจ้าของร้าน" (JWT + bcrypt) เท่านั้น
+- **Backend** (`server/`): Express + `node:sqlite` (SQLite ในตัว Node.js เอง ไม่ต้อง compile native module) — ใช้เฉพาะสำหรับยืนยันตัวตนของบัญชี "เจ้าของร้าน" (JWT + bcrypt) เท่านั้น
 - Lint: `oxlint`
 
 ## ฟีเจอร์หลัก
@@ -36,7 +36,7 @@
 
 ### 1. ติดตั้ง dependencies
 
-`server/` ใช้ `better-sqlite3` ซึ่งต้อง compile native module ตอนติดตั้ง — เครื่องต้องมี Python 3 และ build tools ของ node-gyp พร้อมอยู่ก่อน (บน Windows คือ Python 3 + Visual Studio Build Tools; ถ้าไม่มีจะเจอ error แบบ "find Python ... could not be run" ตอน `npm install`/`npm ci`)
+`server/` ใช้ `node:sqlite` (SQLite ในตัว Node.js) แทน native module แบบเดิม — **ต้องใช้ Node.js เวอร์ชัน 22.5 ขึ้นไป** ไม่ต้องติดตั้ง Python หรือ C++ build tools ใดๆ เพิ่ม
 
 ```bash
 npm install
@@ -88,7 +88,7 @@ src/
   lib/        ฟังก์ชันช่วยเหลือ (auth, สิทธิ์การใช้งาน, export CSV, ...)
 server/
   src/index.js  Express API (login / เปลี่ยนรหัสผ่าน) — จำกัดจำนวนครั้งที่ลองผิด (rate limit) และจำกัด CORS เฉพาะ localhost
-  src/db.js     การเชื่อมต่อ SQLite (better-sqlite3)
+  src/db.js     การเชื่อมต่อ SQLite (node:sqlite)
   src/seed.js   สคริปต์สร้างบัญชี admin เริ่มต้น
 .claude/skills/audit-and-fix/  สกิลสำหรับตรวจสอบบั๊กที่พบซ้ำๆ ในโปรเจกต์นี้อัตโนมัติ (เรียกด้วย `/audit-and-fix`)
 ```
