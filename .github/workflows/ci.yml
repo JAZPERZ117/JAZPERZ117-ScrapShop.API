@@ -31,7 +31,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # server/ uses node:sqlite (see package.json "engines"), stable from Node 22.5+ —
+          # keep this ahead of the frontend job's Node version deliberately.
+          node-version: 22
           cache: npm
           cache-dependency-path: server/package-lock.json
       - run: npm ci
