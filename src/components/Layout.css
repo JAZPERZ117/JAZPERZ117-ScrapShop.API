@@ -450,3 +450,32 @@
     justify-content: center;
   }
 }
+
+@media (max-width: 640px) {
+  .sidebar {
+    width: 60px;
+  }
+  .brand {
+    padding: 16px 10px 14px;
+    justify-content: center;
+  }
+  .content {
+    padding: 16px 14px 40px;
+  }
+  .topbar {
+    padding: 0 12px;
+    gap: 10px;
+  }
+  .kbd {
+    display: none;
+  }
+  .search-box {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  .user-chip > div {
+    display: none;
+  }
+}
