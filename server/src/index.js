@@ -16,12 +16,18 @@ if (!JWT_SECRET) {
 }
 
 const app = express();
-// Same-machine origins only (any port, so Vite picking a different port than 5173 still
-// works) — this app has no reason for a request from an arbitrary external site to reach it.
+// Same-machine origins, plus browsers loading the frontend from this machine's LAN IP (so a
+// second till/tablet in the shop can use it too) — any port, so Vite picking a different port
+// than 5173 still works. Deliberately scoped to loopback and the private address ranges
+// (RFC 1918) rather than any origin, so even if this server were ever reachable from the wider
+// internet (e.g. a misconfigured router), a page loaded from outside the shop's own network
+// still couldn't call this API.
+const LAN_ORIGIN_RE =
+  /^https?:\/\/(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})(:\d+)?$/;
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      if (!origin || LAN_ORIGIN_RE.test(origin)) {
         return callback(null, true);
       }
       callback(new Error('Not allowed by CORS'));

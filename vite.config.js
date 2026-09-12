@@ -5,6 +5,10 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Bind every interface (not just localhost) so other devices on the shop's LAN can open
+    // this app — paired with the backend's CORS allowlist below, which only trusts origins on
+    // private address ranges, so this doesn't by itself expose the app past the local network.
+    host: true,
     port: process.env.PORT ? Number(process.env.PORT) : 5173,
     strictPort: false,
     proxy: {

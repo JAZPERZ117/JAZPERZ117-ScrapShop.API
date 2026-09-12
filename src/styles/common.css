@@ -175,6 +175,9 @@
   gap: 16px;
   margin-bottom: 20px;
 }
+.stat-grid > * {
+  min-width: 0;
+}
 .stat-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -233,6 +236,14 @@
   grid-template-columns: 1fr var(--detail-w, 350px);
   gap: 20px;
   align-items: start;
+}
+/* Thai script has no spaces between words, so a browser can't find a line-break point when
+   computing a grid item's intrinsic minimum width — a long Thai sentence deep inside a column
+   can otherwise force that column (and the whole page) wider than the viewport. Letting grid
+   items shrink below their content's "preferred" width is what allows normal text wrapping to
+   take over instead. */
+.grid > * {
+  min-width: 0;
 }
 @media (max-width: 1100px) {
   .grid {
@@ -699,10 +710,16 @@ textarea.input-plain {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 11px 13px;
   background: var(--bg);
   border-radius: 10px;
   margin: 14px 0;
+}
+/* Same fix as .grid > * above: the label/description text block is a flex item and needs to
+   be allowed to shrink and wrap instead of forcing the row (and page) wider than the viewport. */
+.toggle-row > div:first-child {
+  min-width: 0;
 }
 .toggle-row .lbl {
   font-size: 12.5px;
@@ -1190,6 +1207,9 @@ textarea.input-plain {
   gap: 12px;
   margin-top: 18px;
 }
+.quarter-grid > * {
+  min-width: 0;
+}
 .quarter-card {
   background: var(--bg);
   border-radius: 10px;
@@ -1459,6 +1479,49 @@ textarea.input-plain {
   font-size: 11px;
   color: var(--ink-500);
   margin-top: 24px;
+}
+
+/* ===== small-screen (tablet-portrait / phone) adjustments ===== */
+@media (max-width: 768px) {
+  /* A data table's columns don't reflow for a narrow screen — scroll the whole table
+     horizontally as one unit instead of squeezing every column illegibly. The table itself
+     still lays out as a table (thead/tbody/tr keep their row/cell display), only the outer
+     <table> box becomes the scrolling block, so column alignment is unaffected. */
+  .data-table,
+  .a4-doc table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  /* An empty-state message spanning the table shouldn't be forced onto one unreadable line
+     just because its sibling data rows need nowrap to stay scrollable. */
+  .data-table .empty-hint {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 640px) {
+  .card-pad {
+    padding: 16px;
+  }
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+  .quarter-grid {
+    grid-template-columns: 1fr;
+  }
+  .field-row {
+    flex-wrap: wrap;
+  }
+  .a4-doc {
+    padding: 18px 16px;
+  }
+  .a4-doc-meta-grid {
+    grid-template-columns: 1fr;
+  }
+  .a4-doc-summary {
+    max-width: none;
+  }
 }
 
 /* ===== print isolation: only the receipt paper slip / full-page document is printed ===== */
