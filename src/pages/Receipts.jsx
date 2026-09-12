@@ -112,13 +112,17 @@ export default function Receipts() {
   const selectedStatus = selected.status;
   const voidedIds = useMemo(() => order.filter((id) => receipts[id].status === 'void'), [order, receipts]);
 
-  // "วันนี้"/"เดือนนี้" stat cards only count active receipts — a voided receipt shouldn't
-  // still add to revenue/count, same convention used on ScrapPurchase/Dashboard/DailySummary.
-  const activeOrder = useMemo(() => order.filter((id) => receipts[id].status !== 'void'), [order, receipts]);
+  // "วันนี้"/"เดือนนี้" stat cards only count active receipts dated today — a voided receipt
+  // or one from a previous day shouldn't still add to today's count/revenue, same convention
+  // used on ScrapPurchase/Dashboard/DailySummary.
+  const todayActiveOrder = useMemo(
+    () => order.filter((id) => receipts[id].status !== 'void' && receipts[id].date === todayISO()),
+    [order, receipts]
+  );
   const newReceiptIds = useMemo(() => order.filter((id) => !INITIAL_ORDER.includes(id)), [order]);
   const newActiveReceiptIds = useMemo(() => newReceiptIds.filter((id) => receipts[id].status !== 'void'), [newReceiptIds, receipts]);
-  const todayCount = activeOrder.length;
-  const todayTotal = useMemo(() => activeOrder.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0), [activeOrder, receipts]);
+  const todayCount = todayActiveOrder.length;
+  const todayTotal = useMemo(() => todayActiveOrder.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0), [todayActiveOrder, receipts]);
   const monthCount = 186 + newActiveReceiptIds.length;
   const monthTotal = 512450 + newActiveReceiptIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
   const reprintCount = 9 + activity.filter((a) => a.text.startsWith('พิมพ์ซ้ำ') || a.text.startsWith('ดาวน์โหลด')).length;
@@ -136,6 +140,13 @@ export default function Receipts() {
     const target = receipts[id];
     if (target.status === 'void') return;
     if (!window.confirm(`ยืนยันยกเลิกใบเสร็จ ${target.no}?`)) return;
+    // Voiding a receipt that's open in the edit panel must close that panel — otherwise
+    // "บันทึกการแก้ไข" could still fire afterward and overwrite the now-void receipt with new
+    // numbers that were never reflected back into stock/customer totals.
+    if (isEditing && editForm?.id === id) {
+      setIsEditing(false);
+      setEditForm(null);
+    }
     setReceipts((prev) => ({ ...prev, [id]: { ...prev[id], status: 'void' } }));
     // A voided purchase never happened, so give back what it took: the stock it added
     // (matched by item name, mirroring how ScrapPurchase.jsx's addStock looked it up) and
@@ -243,6 +254,12 @@ export default function Receipts() {
   const editGrandTotal = Math.max(editSubtotal - editDeductionMoney, 0);
 
   function saveEdit() {
+    if (receipts[editForm.id]?.status === 'void') {
+      setBanner({ type: 'error', text: `ใบเสร็จ ${receipts[editForm.id]?.no} ถูกยกเลิกไปแล้ว ไม่สามารถบันทึกการแก้ไขได้` });
+      setIsEditing(false);
+      setEditForm(null);
+      return;
+    }
     if (!editForm.cust.trim()) {
       setBanner({ type: 'error', text: 'กรุณากรอกชื่อลูกค้า' });
       return;

@@ -351,11 +351,22 @@ export default function Users() {
 
             <div className="field">
               <label>สิทธิ์การใช้งาน</label>
-              <select className="input-plain" value={editRole} onChange={(e) => setEditRole(e.target.value)}>
+              <select
+                className="input-plain"
+                value={editRole}
+                onChange={(e) => setEditRole(e.target.value)}
+                disabled={selectedId === 'admin'}
+                title={selectedId === 'admin' ? 'บัญชี admin ล็อกอินผ่านเซิร์ฟเวอร์และมีสิทธิ์เจ้าของร้านตายตัว เปลี่ยนที่นี่ไม่ได้' : undefined}
+              >
                 {ROLES.map((r) => (
                   <option key={r}>{r}</option>
                 ))}
               </select>
+              {selectedId === 'admin' && (
+                <div className="sub" style={{ marginTop: 4 }}>
+                  บัญชี admin มีสิทธิ์เจ้าของร้านตายตัวจากเซิร์ฟเวอร์ ไม่สามารถเปลี่ยนได้ที่นี่
+                </div>
+              )}
             </div>
 
             {selectedId !== 'admin' && (
