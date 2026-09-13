@@ -147,7 +147,7 @@ export default function Receipts() {
       setIsEditing(false);
       setEditForm(null);
     }
-    setReceipts((prev) => ({ ...prev, [id]: { ...prev[id], status: 'void' } }));
+    setReceipts((prev) => ({ ...prev, [id]: { ...prev[id], status: 'void', voidedAt: Date.now() } }));
     // A voided purchase never happened, so give back what it took: the stock it added
     // (matched by item name, mirroring how ScrapPurchase.jsx's addStock looked it up) and
     // the customer's lifetime weight/spend/visit bump (only possible for receipts that
