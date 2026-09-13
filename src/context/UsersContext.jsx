@@ -1,5 +1,6 @@
-import { createContext, useContext, useEffect } from 'react';
+import { createContext, useContext, useEffect, useCallback } from 'react';
 import { usePersistentState } from '../lib/persist.js';
+import { getToken } from '../lib/auth.js';
 
 export const ROLES = ['เจ้าของร้าน', 'ผู้จัดการ', 'แคชเชียร์', 'พนักงานชั่งของ'];
 
@@ -14,6 +15,22 @@ export const INITIAL_USERS = {
 };
 
 export const INITIAL_ORDER = ['admin', 'kanjana', 'wittaya', 'prasert'];
+
+// A handful of fixed avatar colors, picked deterministically from the username so a user
+// discovered from the server (created on a different device) still gets a stable, distinct
+// color here instead of everyone defaulting to the same one.
+const AVATAR_COLORS = [
+  { bg: 'var(--green-100)', fg: 'var(--green-700)' },
+  { bg: 'var(--rose-bg)', fg: 'var(--rose)' },
+  { bg: 'var(--blue-bg)', fg: 'var(--blue)' },
+  { bg: 'var(--amber-bg)', fg: 'var(--amber)' },
+  { bg: 'var(--plum-bg)', fg: 'var(--plum)' },
+];
+function avatarColorFor(username) {
+  let hash = 0;
+  for (let i = 0; i < username.length; i++) hash = (hash * 31 + username.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length];
+}
 
 const UsersContext = createContext(null);
 
@@ -41,8 +58,66 @@ export function UsersProvider({ children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Pulls the real staff directory from the shared server database (server/src/index.js
+  // GET /api/users) and merges it into the local cache — this is what makes a PIN or staff
+  // member added on one device show up on another, instead of staying stuck in that one
+  // browser's localStorage. Only the owner's session can call this (the API requires an owner
+  // JWT), so it's a silent no-op for a PIN-login session; that's fine, since only the owner
+  // ever opens the Users page. Cosmetic-only fields (avatar color, initial, last-login display)
+  // aren't tracked server-side at all, so existing local values for a known username are kept
+  // as-is and only assigned fresh for a username discovered for the first time.
+  const refreshUsers = useCallback(async () => {
+    const token = getToken();
+    if (!token) return;
+    let res;
+    try {
+      res = await fetch('/api/users', { headers: { Authorization: `Bearer ${token}` } });
+    } catch {
+      return; // offline or the API server isn't running — keep showing the last-known cache
+    }
+    if (!res.ok) return;
+    const { users: serverUsers } = await res.json();
+
+    // Match by each entry's `username` field, not its local dict key — the seeded demo
+    // accounts are keyed "kanjana"/"wittaya"/"prasert" locally but "kanjana_pos" etc. by
+    // username, so matching on the key would wrongly treat them as brand-new server users
+    // and duplicate every row.
+    const usernameToId = new Map(Object.entries(users).map(([id, u]) => [u.username, id]));
+    const merged = { ...users };
+    const newKeys = [];
+    for (const su of serverUsers) {
+      const existingId = usernameToId.get(su.username);
+      const id = existingId || su.username;
+      if (!existingId) newKeys.push(id);
+      const base = merged[id] || {
+        init: su.displayName.slice(0, 1),
+        ...avatarColorFor(su.username),
+        lastLogin: 'ยังไม่เคยเข้าสู่ระบบ',
+        lastPasswordReset: null,
+      };
+      merged[id] = {
+        ...base,
+        username: su.username,
+        name: su.displayName,
+        role: su.role,
+        active: su.active,
+        pin: su.hasPin || null,
+        serverId: su.id,
+      };
+    }
+    setUsers(merged);
+    if (newKeys.length) {
+      setOrder((prev) => [...prev, ...newKeys.filter((id) => !prev.includes(id))]);
+    }
+  }, [users, setUsers, setOrder]);
+
+  useEffect(() => {
+    refreshUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <UsersContext.Provider value={{ users, setUsers, order, setOrder }}>
+    <UsersContext.Provider value={{ users, setUsers, order, setOrder, refreshUsers }}>
       {children}
     </UsersContext.Provider>
   );

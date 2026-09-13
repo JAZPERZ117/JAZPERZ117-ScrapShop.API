@@ -4,7 +4,12 @@ import RowMenu from '../components/RowMenu.jsx';
 import { useUsers, ROLES } from '../context/UsersContext.jsx';
 import { ROLE_MENU_ACCESS } from '../lib/permissions.js';
 import { navSections } from '../components/navItems.js';
+import { getToken } from '../lib/auth.js';
 import './Users.css';
+
+function authHeaders() {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` };
+}
 
 const MENU_LABEL = Object.fromEntries(navSections.flatMap((s) => s.items).map((item) => [item.key, item.label]));
 
@@ -19,7 +24,7 @@ function nowTimeStr() {
 }
 
 export default function Users() {
-  const { users, setUsers, order, setOrder } = useUsers();
+  const { users, setUsers, order, setOrder, refreshUsers } = useUsers();
   const [selectedId, setSelectedId] = useState(order[0]);
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState('');
@@ -28,7 +33,10 @@ export default function Users() {
   const [newPin, setNewPin] = useState('');
   const [editName, setEditName] = useState(users[order[0]]?.name || '');
   const [editRole, setEditRole] = useState(users[order[0]]?.role || ROLES[0]);
-  const [editPin, setEditPin] = useState(users[order[0]]?.pin || '');
+  // Always starts blank, even for a user that already has a PIN set — the server never sends
+  // the actual digits back (see GET /api/users' `hasPin` flag instead of `pin`), so this field
+  // only ever means "set a new PIN," never "here's the current one."
+  const [editPin, setEditPin] = useState('');
   const [banner, setBanner] = useState(null);
   const [showPwForm, setShowPwForm] = useState(false);
   const [currentPw, setCurrentPw] = useState('');
@@ -43,46 +51,93 @@ export default function Users() {
     setSelectedId(id);
     setEditName(users[id].name);
     setEditRole(users[id].role);
-    setEditPin(users[id].pin || '');
+    setEditPin('');
     setShowPwForm(false);
     setCurrentPw('');
     setNewPw('');
     setConfirmPw('');
   }
 
-  // PIN quick-login (see Login.jsx) identifies a user purely by matching the 4-digit code
-  // against every active user's pin, so two people can't be assigned the same one.
-  function pinTaken(pin, excludeId) {
-    return Object.keys(users).some((id) => id !== excludeId && id !== 'admin' && users[id].pin === pin);
-  }
-
-  function toggleActive(id) {
-    setUsers((prev) => ({ ...prev, [id]: { ...prev[id], active: !prev[id].active } }));
-  }
-
-  function handleSaveChanges() {
-    const pin = editPin.trim();
-    if (selectedId !== 'admin' && pin) {
-      if (!/^\d{4}$/.test(pin)) {
-        setBanner({ type: 'error', text: 'PIN ต้องเป็นตัวเลข 4 หลัก' });
-        return;
-      }
-      if (pinTaken(pin, selectedId)) {
-        setBanner({ type: 'error', text: `PIN นี้ถูกใช้โดยผู้ใช้งานคนอื่นแล้ว กรุณาตั้งรหัสอื่น` });
-        return;
-      }
+  async function toggleActive(id) {
+    const target = users[id];
+    const nextActive = !target.active;
+    setUsers((prev) => ({ ...prev, [id]: { ...prev[id], active: nextActive } }));
+    if (!target.serverId) return;
+    try {
+      const res = await fetch(`/api/users/${target.serverId}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ active: nextActive }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setUsers((prev) => ({ ...prev, [id]: { ...prev[id], active: !nextActive } }));
+      setBanner({ type: 'error', text: 'บันทึกสถานะไม่สำเร็จ กรุณาลองใหม่' });
     }
-    setUsers((prev) => ({
-      ...prev,
-      [selectedId]: { ...prev[selectedId], name: editName.trim() || prev[selectedId].name, role: editRole, pin: selectedId === 'admin' ? null : pin || null },
-    }));
-    setBanner({ type: 'success', text: `บันทึกข้อมูลผู้ใช้งาน ${editName.trim() || u.name} เรียบร้อยแล้ว` });
   }
 
-  function handleDelete(id = selectedId) {
+  async function handleSaveChanges() {
+    const pin = editPin.trim();
+    if (pin && !/^\d{4}$/.test(pin)) {
+      setBanner({ type: 'error', text: 'PIN ต้องเป็นตัวเลข 4 หลัก' });
+      return;
+    }
+    if (selectedId === 'admin') {
+      setUsers((prev) => ({ ...prev, admin: { ...prev.admin, name: editName.trim() || prev.admin.name, role: editRole } }));
+      setBanner({ type: 'success', text: `บันทึกข้อมูลผู้ใช้งาน ${editName.trim() || u.name} เรียบร้อยแล้ว` });
+      return;
+    }
+    if (!u.serverId) {
+      setBanner({ type: 'error', text: 'ไม่พบผู้ใช้งานนี้บนเซิร์ฟเวอร์ กรุณารีเฟรชหน้าแล้วลองใหม่' });
+      return;
+    }
+    try {
+      const body = { displayName: editName.trim() || u.name, role: editRole };
+      if (pin) body.pin = pin; // omitted entirely unless a new PIN was actually typed
+      const res = await fetch(`/api/users/${u.serverId}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(body) });
+      const data = await res.json();
+      if (!res.ok) {
+        setBanner({ type: 'error', text: data.error || 'บันทึกไม่สำเร็จ' });
+        return;
+      }
+      setEditPin('');
+      await refreshUsers();
+      setBanner({ type: 'success', text: `บันทึกข้อมูลผู้ใช้งาน ${editName.trim() || u.name} เรียบร้อยแล้ว` });
+    } catch {
+      setBanner({ type: 'error', text: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่อีกครั้ง' });
+    }
+  }
+
+  async function handleClearPin() {
+    if (!u.serverId || !window.confirm(`ยืนยันลบ PIN ของ "${u.name}"?`)) return;
+    try {
+      const res = await fetch(`/api/users/${u.serverId}`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({ pin: '' }) });
+      if (!res.ok) throw new Error();
+      setEditPin('');
+      await refreshUsers();
+      setBanner({ type: 'success', text: `ลบ PIN ของ "${u.name}" แล้ว` });
+    } catch {
+      setBanner({ type: 'error', text: 'ลบ PIN ไม่สำเร็จ กรุณาลองใหม่' });
+    }
+  }
+
+  async function handleDelete(id = selectedId) {
     if (id === 'admin') return;
     const target = users[id];
     if (!window.confirm(`ยืนยันลบผู้ใช้งาน "${target.name}"?`)) return;
+    if (target.serverId) {
+      try {
+        const res = await fetch(`/api/users/${target.serverId}`, { method: 'DELETE', headers: authHeaders() });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setBanner({ type: 'error', text: data.error || 'ลบผู้ใช้งานไม่สำเร็จ' });
+          return;
+        }
+      } catch {
+        setBanner({ type: 'error', text: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่อีกครั้ง' });
+        return;
+      }
+    }
     const remaining = order.filter((oid) => oid !== id);
     setOrder(remaining);
     setUsers((prev) => {
@@ -94,50 +149,38 @@ export default function Users() {
     setBanner({ type: 'error', text: `ลบผู้ใช้งาน "${target.name}" แล้ว` });
   }
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
     if (!newName.trim() || !newUsername.trim()) return;
-    const id = newUsername.trim().toLowerCase();
-    if (users[id]) {
-      setBanner({ type: 'error', text: `ชื่อผู้ใช้งาน "${newUsername.trim()}" มีอยู่แล้ว กรุณาใช้ชื่ออื่น` });
+    const pin = newPin.trim();
+    if (pin && !/^\d{4}$/.test(pin)) {
+      setBanner({ type: 'error', text: 'PIN ต้องเป็นตัวเลข 4 หลัก' });
       return;
     }
-    const pin = newPin.trim();
-    if (pin) {
-      if (!/^\d{4}$/.test(pin)) {
-        setBanner({ type: 'error', text: 'PIN ต้องเป็นตัวเลข 4 หลัก' });
+    try {
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ username: newUsername.trim(), displayName: newName.trim(), role: newRole, pin: pin || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBanner({ type: 'error', text: data.error || 'เพิ่มผู้ใช้งานไม่สำเร็จ' });
         return;
       }
-      if (pinTaken(pin, null)) {
-        setBanner({ type: 'error', text: 'PIN นี้ถูกใช้โดยผู้ใช้งานคนอื่นแล้ว กรุณาตั้งรหัสอื่น' });
-        return;
-      }
+      await refreshUsers();
+      setSelectedId(data.user.username);
+      setEditName(newName.trim());
+      setEditRole(newRole);
+      setEditPin('');
+      setNewName('');
+      setNewUsername('');
+      setNewPin('');
+      setShowNew(false);
+      setBanner({ type: 'success', text: `เพิ่มผู้ใช้งาน ${newName.trim()} เรียบร้อยแล้ว` });
+    } catch {
+      setBanner({ type: 'error', text: 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองใหม่อีกครั้ง' });
     }
-    setUsers((prev) => ({
-      ...prev,
-      [id]: {
-        username: newUsername.trim(),
-        name: newName.trim(),
-        role: newRole,
-        init: newName.trim().slice(0, 1),
-        bg: 'var(--green-100)',
-        fg: 'var(--green-700)',
-        lastLogin: 'ยังไม่เคยเข้าสู่ระบบ',
-        active: true,
-        lastPasswordReset: null,
-        pin: pin || null,
-      },
-    }));
-    setOrder((prev) => [id, ...prev]);
-    setSelectedId(id);
-    setEditName(newName.trim());
-    setEditRole(newRole);
-    setEditPin(pin);
-    setNewName('');
-    setNewUsername('');
-    setNewPin('');
-    setShowNew(false);
-    setBanner({ type: 'success', text: `เพิ่มผู้ใช้งาน ${newName.trim()} เรียบร้อยแล้ว` });
   }
 
   // "admin" is the only account with a real backend login (server/src/index.js), so its
@@ -374,12 +417,17 @@ export default function Users() {
                 <label>PIN เข้าสู่ระบบด่วน (4 หลัก)</label>
                 <input
                   className="input-plain"
-                  placeholder="ยังไม่ได้ตั้ง PIN"
+                  placeholder={u.pin ? 'ตั้งไว้แล้ว — พิมพ์ 4 หลักเพื่อเปลี่ยน' : 'ยังไม่ได้ตั้ง PIN'}
                   inputMode="numeric"
                   maxLength={4}
                   value={editPin}
                   onChange={(e) => setEditPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
                 />
+                {u.pin && (
+                  <button type="button" className="forgot" style={{ marginTop: 6 }} onClick={handleClearPin}>
+                    ลบ PIN
+                  </button>
+                )}
               </div>
             )}
 

@@ -65,6 +65,7 @@ export default function Login() {
   const [showPinLogin, setShowPinLogin] = useState(false);
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
+  const [pinSubmitting, setPinSubmitting] = useState(false);
 
   function validate() {
     const next = {};
@@ -108,27 +109,43 @@ export default function Login() {
     }
   }
 
-  // Non-admin accounts have no real backend login (see UsersContext.jsx) — this is a
-  // deliberately lower-security "shared front-counter device" shortcut, so the session it
-  // creates isn't remembered past the browser tab (sessionStorage, not localStorage) and
-  // carries a synthetic token rather than a real backend JWT.
-  function handlePinLogin(e) {
+  // Checked against the shared server database (POST /api/pin-login) rather than this
+  // browser's own local user list — a PIN only set up in another browser's localStorage would
+  // otherwise never match here, which is exactly what made PIN login fail on any device other
+  // than the one it was set up on. The session it creates still isn't remembered past the
+  // browser tab (sessionStorage, not localStorage), matching the previous "shared front-counter
+  // device" behavior.
+  async function handlePinLogin(e) {
     e.preventDefault();
     setPinError('');
     if (!/^\d{4}$/.test(pin)) {
       setPinError('กรุณากรอก PIN 4 หลัก');
       return;
     }
-    const matchedId = Object.keys(users).find((id) => id !== 'admin' && users[id].pin === pin);
-    const matched = matchedId ? users[matchedId] : null;
-    if (!matched || !matched.active) {
-      setPinError('PIN ไม่ถูกต้อง หรือบัญชีนี้ถูกปิดใช้งาน');
-      return;
+    setPinSubmitting(true);
+    try {
+      const res = await fetch('/api/pin-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPinError(data.error || 'PIN ไม่ถูกต้อง หรือบัญชีนี้ถูกปิดใช้งาน');
+        return;
+      }
+      storeAuth(data, false);
+      const matchedId = Object.keys(users).find((id) => users[id].username === data.user.username);
+      if (matchedId) {
+        const ts = nowTimeStr();
+        setUsers((prev) => ({ ...prev, [matchedId]: { ...prev[matchedId], lastLogin: `วันนี้ ${ts}` } }));
+      }
+      navigate('/', { replace: true });
+    } catch {
+      setPinError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาตรวจสอบว่าเปิดเซิร์ฟเวอร์ API แล้ว');
+    } finally {
+      setPinSubmitting(false);
     }
-    storeAuth({ token: 'pin-session', user: { id: matchedId, username: matched.username, displayName: matched.name, role: matched.role } }, false);
-    const ts = nowTimeStr();
-    setUsers((prev) => ({ ...prev, [matchedId]: { ...prev[matchedId], lastLogin: `วันนี้ ${ts}` } }));
-    navigate('/', { replace: true });
   }
 
   return (
@@ -314,7 +331,8 @@ export default function Login() {
                       </div>
                       {pinError && <p className="field-error">{pinError}</p>}
                       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                        <button type="button" className="btn-login" style={{ flex: 1 }} onClick={handlePinLogin}>
+                        <button type="button" className="btn-login" style={{ flex: 1 }} onClick={handlePinLogin} disabled={pinSubmitting}>
+                          {pinSubmitting ? <span className="spinner" /> : null}
                           เข้าสู่ระบบด่วน
                         </button>
                         <button
