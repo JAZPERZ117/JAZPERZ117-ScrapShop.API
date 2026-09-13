@@ -83,13 +83,13 @@ export function UsersProvider({ children }) {
     // username, so matching on the key would wrongly treat them as brand-new server users
     // and duplicate every row.
     const usernameToId = new Map(Object.entries(users).map(([id, u]) => [u.username, id]));
-    const merged = { ...users };
+    const merged = {};
     const newKeys = [];
     for (const su of serverUsers) {
       const existingId = usernameToId.get(su.username);
       const id = existingId || su.username;
       if (!existingId) newKeys.push(id);
-      const base = merged[id] || {
+      const base = users[id] || {
         init: su.displayName.slice(0, 1),
         ...avatarColorFor(su.username),
         lastLogin: 'ยังไม่เคยเข้าสู่ระบบ',
@@ -105,10 +105,16 @@ export function UsersProvider({ children }) {
         serverId: su.id,
       };
     }
+    // Every real account lives on the server now, so anything left over here either never
+    // actually made it there (created by a stale copy of this page from before the server
+    // became the source of truth) or was deleted from another device — drop it rather than
+    // leaving a phantom entry that looks real but can't be edited or logged into.
     setUsers(merged);
-    if (newKeys.length) {
-      setOrder((prev) => [...prev, ...newKeys.filter((id) => !prev.includes(id))]);
-    }
+    setOrder((prev) => {
+      const kept = prev.filter((id) => id in merged);
+      const withNew = [...kept, ...newKeys.filter((id) => !kept.includes(id))];
+      return withNew.length === prev.length && withNew.every((id, i) => id === prev[i]) ? prev : withNew;
+    });
   }, [users, setUsers, setOrder]);
 
   useEffect(() => {
