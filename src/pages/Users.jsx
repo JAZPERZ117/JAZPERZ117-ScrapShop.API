@@ -510,19 +510,19 @@ export default function Users() {
             </div>
             <div className="mini-stat-row" style={{ alignItems: 'flex-start' }}>
               <span>เจ้าของร้าน</span>
-              <span className="n" style={{ textAlign: 'right', maxWidth: '65%' }}>{roleMenuSummary('เจ้าของร้าน')}</span>
+              <span className="n" style={{ textAlign: 'right', maxWidth: '65%', whiteSpace: 'normal' }}>{roleMenuSummary('เจ้าของร้าน')}</span>
             </div>
             <div className="mini-stat-row" style={{ alignItems: 'flex-start' }}>
               <span>ผู้จัดการ</span>
-              <span className="n" style={{ textAlign: 'right', maxWidth: '65%' }}>{roleMenuSummary('ผู้จัดการ')}</span>
+              <span className="n" style={{ textAlign: 'right', maxWidth: '65%', whiteSpace: 'normal' }}>{roleMenuSummary('ผู้จัดการ')}</span>
             </div>
             <div className="mini-stat-row" style={{ alignItems: 'flex-start' }}>
               <span>แคชเชียร์</span>
-              <span className="n" style={{ textAlign: 'right', maxWidth: '65%' }}>{roleMenuSummary('แคชเชียร์')}</span>
+              <span className="n" style={{ textAlign: 'right', maxWidth: '65%', whiteSpace: 'normal' }}>{roleMenuSummary('แคชเชียร์')}</span>
             </div>
             <div className="mini-stat-row" style={{ alignItems: 'flex-start' }}>
               <span>พนักงานชั่งของ</span>
-              <span className="n" style={{ textAlign: 'right', maxWidth: '65%' }}>{roleMenuSummary('พนักงานชั่งของ')}</span>
+              <span className="n" style={{ textAlign: 'right', maxWidth: '65%', whiteSpace: 'normal' }}>{roleMenuSummary('พนักงานชั่งของ')}</span>
             </div>
             <div className="helper-note" style={{ marginTop: 10 }}>
               <IconLock />
