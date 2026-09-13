@@ -74,7 +74,14 @@ export default function Dashboard() {
   }, [activeReceipts, receipts, products]);
 
   const latestNewReceipt = receipts[newReceiptIds[0]];
-  const latestVoided = receiptOrder.find((id) => receipts[id].status === 'void');
+  // Voided receipts can be voided out of creation order, so pick by voidedAt (when
+  // present) rather than receiptOrder's creation-time ordering — otherwise voiding an
+  // older receipt after a newer one is already void would keep showing the older event.
+  const latestVoided = useMemo(() => {
+    const voidedIds = receiptOrder.filter((id) => receipts[id].status === 'void');
+    if (voidedIds.length === 0) return undefined;
+    return voidedIds.reduce((latest, id) => ((receipts[id].voidedAt || 0) > (receipts[latest].voidedAt || 0) ? id : latest));
+  }, [receiptOrder, receipts]);
 
   return (
     <>
