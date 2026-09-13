@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { IconUsers, IconUserAdd, IconCheck, IconLock, IconGear, IconEdit, IconTrash } from '../icons.jsx';
 import RowMenu from '../components/RowMenu.jsx';
 import { useUsers, ROLES } from '../context/UsersContext.jsx';
@@ -46,6 +46,17 @@ export default function Users() {
 
   const u = users[selectedId];
   const loggedInToday = order.filter((id) => (users[id].lastLogin || '').startsWith('วันนี้'));
+
+  // The selected user can vanish out from under this page — refreshUsers() (see
+  // UsersContext.jsx) prunes any local entry the server no longer has, e.g. because it was
+  // deleted from another device, or never actually existed there in the first place (a stale
+  // page's locally-created user that never reached the database). Re-select the first
+  // remaining user rather than crashing on `u.name` etc. below.
+  useEffect(() => {
+    if (!u && order[0]) selectUser(order[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [u, order]);
+  if (!u) return null;
 
   function selectUser(id) {
     setSelectedId(id);
