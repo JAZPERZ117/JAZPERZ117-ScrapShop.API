@@ -479,3 +479,32 @@
     display: none;
   }
 }
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .brand {
+    padding: 8px 8px 6px;
+  }
+  .brand-icon {
+    width: 30px;
+    height: 30px;
+  }
+  .nav-scroll {
+    padding: 2px 8px 8px;
+  }
+  .nav-item {
+    padding: 6px 8px;
+  }
+  .sidebar-footer {
+    padding: 6px;
+  }
+  .shop-pill,
+  .logout {
+    padding: 6px 8px;
+  }
+  .topbar {
+    height: 52px;
+  }
+  .content {
+    padding: 14px 16px 32px;
+  }
+}
