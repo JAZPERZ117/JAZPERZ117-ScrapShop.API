@@ -298,6 +298,17 @@ export default function Login() {
                           placeholder="••••"
                           value={pin}
                           onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                          onKeyDown={(e) => {
+                            // This field lives inside the same <form> as the username/password
+                            // login (a nested <form> isn't valid HTML), so pressing Enter would
+                            // otherwise trigger THAT form's implicit submit button and run
+                            // handleSubmit — showing "กรุณากรอกชื่อผู้ใช้งาน..." errors instead of
+                            // checking the PIN. Route Enter to the PIN handler explicitly.
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handlePinLogin(e);
+                            }
+                          }}
                           autoFocus
                         />
                       </div>
