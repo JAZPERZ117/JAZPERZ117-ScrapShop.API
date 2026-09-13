@@ -122,6 +122,13 @@ export default function Scales() {
   }
 
   function handleRemove(id = selectedId) {
+    // ScrapPurchase.jsx reads `scaleDevices[mainScaleId]` unconditionally, so letting the last
+    // scale device be removed would leave that page with no device to fall back to and crash
+    // it on the next visit.
+    if (order.length <= 1) {
+      setBanner({ type: 'error', text: 'ต้องมีเครื่องชั่งอย่างน้อย 1 เครื่อง ไม่สามารถนำเครื่องสุดท้ายออกได้' });
+      return;
+    }
     const target = devices[id];
     if (!window.confirm(`ยืนยันนำเครื่องชั่ง "${target.name}" ออกจากระบบ?`)) return;
     const remaining = order.filter((oid) => oid !== id);

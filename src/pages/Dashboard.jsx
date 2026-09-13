@@ -31,6 +31,13 @@ function parseMoney(s) {
   return parseFloat(String(s).replace(/[^\d.]/g, '')) || 0;
 }
 
+// Local, not UTC — matches ReceiptsContext.jsx's own todayISO(), which is what every
+// receipt's `date` field is actually stamped with.
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function money(n) {
   return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -40,18 +47,21 @@ export default function Dashboard() {
   const { order: customerOrder } = useCustomers();
   const { products } = useProducts();
 
-  // "Today" here follows the same convention used on the Receipts page: the seed
-  // receipts represent today's baseline business, and anything added beyond that
+  // "This month" here follows the same convention used on the Receipts page: the seed
+  // receipts represent this month's baseline business, and anything added beyond that
   // baseline is real growth on top of it — so these numbers move as real receipts come in.
   const newReceiptIds = useMemo(() => receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id)), [receiptOrder]);
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
   const newActiveReceiptIds = useMemo(() => newReceiptIds.filter((id) => receipts[id].status !== 'void'), [newReceiptIds, receipts]);
-  const todayTotal = useMemo(() => activeReceipts.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0), [activeReceipts, receipts]);
+  // "วันนี้" cards need the actual date filter on top of "active" — active receipts alone are
+  // every non-void receipt ever, which would make these stats only ever grow, never reset.
+  const todayActiveReceipts = useMemo(() => activeReceipts.filter((id) => receipts[id].date === todayISO()), [activeReceipts, receipts]);
+  const todayTotal = useMemo(() => todayActiveReceipts.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0), [todayActiveReceipts, receipts]);
   const monthCount = 186 + newActiveReceiptIds.length;
   const monthTotal = 512450 + newActiveReceiptIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
   const cashOnHand = useMemo(
-    () => activeReceipts.filter((id) => receipts[id].method === 'เงินสด').reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
-    [activeReceipts, receipts]
+    () => todayActiveReceipts.filter((id) => receipts[id].method === 'เงินสด').reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
+    [todayActiveReceipts, receipts]
   );
   const newCustomerIds = customerOrder.filter((id) => !CUSTOMERS_INITIAL_ORDER.includes(id));
 
@@ -103,7 +113,7 @@ export default function Dashboard() {
             <div className="stat-label">ยอดรับซื้อวันนี้</div>
             <div className="stat-value">{money(todayTotal)}</div>
             <div className="stat-foot" style={{ color: 'var(--ink-500)' }}>
-              {activeReceipts.length} ใบเสร็จ
+              {todayActiveReceipts.length} ใบเสร็จ
             </div>
           </div>
         </div>

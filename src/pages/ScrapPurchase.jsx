@@ -32,6 +32,13 @@ import './ScrapPurchase.css';
 
 const PAY_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', promptpay: 'พร้อมเพย์' };
 
+// Local, not UTC — matches ReceiptsContext.jsx's own todayISO(), which is what every
+// receipt's `date` field is actually stamped with.
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // The unselected-customer placeholder already tells the cashier "this will be recorded as
 // a walk-in customer" — handleSubmit used to contradict that by blocking submission outright
 // with no customer picked. This is what a receipt actually becomes in that case.
@@ -181,9 +188,10 @@ export default function ScrapPurchase() {
     return r.deductionReasonId === 'other' ? (r.customReason || '').trim() : reasons[r.deductionReasonId]?.name || '';
   }
 
-  // Same "today" convention used across the app: seed receipts represent today's baseline
-  // business, real activity adds on top of it — see Dashboard/Receipts for the same pattern.
-  const todayReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
+  // "วันนี้"/"เดือนนี้" stat cards only count active receipts dated today (see Receipts.jsx for
+  // the same convention) — without the date check this silently accumulates every non-void
+  // receipt ever issued instead of resetting daily.
+  const todayReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void' && receipts[id].date === todayISO());
   const todayReceiptCount = todayReceipts.length;
   const todayWeightTotal = todayReceipts.reduce((sum, id) => sum + parseWeightStr(receipts[id].weight), 0);
   const todayMoneyTotal = todayReceipts.reduce((sum, id) => sum + parseMoneyStr(receipts[id].total), 0);
