@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { IconSearch, IconBell, IconUsers, IconReceipt, IconWarningTriangle } from '../icons.jsx';
+import { IconSearch, IconBell, IconUsers, IconReceipt, IconWarningTriangle, IconSun, IconMoon } from '../icons.jsx';
 import { SEARCH_INDEX, TYPE_LABELS } from '../lib/searchIndex.js';
 import { useCustomers } from '../context/CustomersContext.jsx';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
+import { useSettings } from '../context/SettingsContext.jsx';
 
 function initials(name) {
   return (name || '').trim().slice(0, 1) || '?';
@@ -13,6 +14,8 @@ export default function Topbar({ user }) {
   const navigate = useNavigate();
   const { customers, order: customerOrder } = useCustomers();
   const { receipts, order: receiptOrder } = useReceipts();
+  const { settings, updateSetting } = useSettings();
+  const isDark = settings.theme === 'dark';
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
@@ -149,6 +152,14 @@ export default function Topbar({ user }) {
         )}
       </div>
       <div className="topbar-right">
+        <button
+          type="button"
+          className="bell"
+          onClick={() => updateSetting('theme', isDark ? 'light' : 'dark')}
+          title={isDark ? 'สลับเป็นโหมดสว่าง' : 'สลับเป็นโหมดมืด'}
+        >
+          {isDark ? <IconMoon /> : <IconSun />}
+        </button>
         <div className="bell-wrap" ref={bellRef}>
           <button type="button" className="bell" onClick={() => setBellOpen((v) => !v)}>
             <IconBell />
