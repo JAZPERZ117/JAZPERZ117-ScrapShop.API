@@ -617,7 +617,17 @@ export default function PrintCenter() {
     const monthCount = 186 + newActiveReceiptIds.length;
     const monthWeight = CURRENT_MONTH_BASELINE_WEIGHT + newActiveReceiptIds.reduce((s, id) => s + parseWeight(receipts[id].weight), 0);
     const totalDeductionKg = activeReceipts.reduce((s, id) => s + (receipts[id].deductionWeight || 0), 0);
-    const wagesPaid = payHistory.reduce((s, p) => s + (p.net || 0), 0);
+    // Real payroll payments only, scoped to this calendar month — payHistory persists
+    // indefinitely, so summing it unfiltered would silently pull in prior months' wages too
+    // once payroll has run more than once, overstating this figure and understating
+    // "กำไรสุทธิ" below. Mirrors MonthlyReport.jsx's identical scoping.
+    const now = new Date();
+    const wagesPaid = payHistory
+      .filter((p) => {
+        const d = new Date(p.paidAt);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+      })
+      .reduce((s, p) => s + (p.net || 0), 0);
     const netProfit = Math.max(monthTotal - wagesPaid, 0);
     return (
       <div className="a4-doc">

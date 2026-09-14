@@ -33,8 +33,6 @@ function nowStr() {
   return new Date().toLocaleString('th-TH', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-const THIS_MONTH_LONG = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'long', year: 'numeric' }).format(new Date());
-
 export default function ProductReport() {
   const { products } = useProducts();
   const { receipts, order: receiptOrder } = useReceipts();
@@ -124,7 +122,7 @@ export default function ProductReport() {
         <div className="head-actions">
           <div className="date-select">
             <IconClockHistory />
-            {THIS_MONTH_LONG}
+            ข้อมูลสะสมทั้งหมด
           </div>
           <button type="button" className="btn btn-ghost" onClick={handleExport}>
             <IconDownload />
@@ -359,7 +357,7 @@ export default function ProductReport() {
               <br />
               โทร. {settings.phone} &nbsp;|&nbsp; เลขผู้เสียภาษี {settings.taxId}
             </div>
-            <div className="a4-doc-title">รายงานสินค้า · {THIS_MONTH_LONG}</div>
+            <div className="a4-doc-title">รายงานสินค้า · ข้อมูลสะสมทั้งหมด</div>
           </div>
           <hr className="a4-doc-divider" />
 
