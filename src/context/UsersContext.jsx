@@ -8,10 +8,10 @@ export const ROLES = ['เจ้าของร้าน', 'ผู้จัด�
 // SQLite users table) — everyone else here logs in only via the PIN quick-login on the
 // login page (see Login.jsx), so their `pin` is what a shared front-counter device checks.
 export const INITIAL_USERS = {
-  admin: { username: 'admin', name: 'เจ้าของร้าน', role: 'เจ้าของร้าน', init: 'จ', bg: 'var(--plum-bg)', fg: 'var(--plum)', lastLogin: 'วันนี้ 10:45 น.', active: true, lastPasswordReset: null, pin: null },
-  kanjana: { username: 'kanjana_pos', name: 'น.ส.กาญจนา ศรีสุข', role: 'แคชเชียร์', init: 'กา', bg: 'var(--rose-bg)', fg: 'var(--rose)', lastLogin: 'วันนี้ 09:02 น.', active: true, lastPasswordReset: null, pin: '1234' },
-  wittaya: { username: 'wittaya_scale', name: 'นายวิทยา ทองสุข', role: 'พนักงานชั่งของ', init: 'วิ', bg: 'var(--blue-bg)', fg: 'var(--blue)', lastLogin: 'เมื่อวาน 16:20 น.', active: true, lastPasswordReset: null, pin: '5678' },
-  prasert: { username: 'prasert_sort', name: 'นายประเสริฐ แสงทอง', role: 'พนักงานชั่งของ', init: 'ปร', bg: 'var(--amber-bg)', fg: 'var(--amber)', lastLogin: '3 พ.ค. 2567', active: false, lastPasswordReset: null, pin: '9012' },
+  admin: { username: 'admin', name: 'เจ้าของร้าน', role: 'เจ้าของร้าน', init: 'จ', bg: 'var(--plum-bg)', fg: 'var(--plum)', lastLogin: 'ยังไม่เคยเข้าสู่ระบบ', active: true, lastPasswordReset: null, pin: null },
+  kanjana: { username: 'kanjana_pos', name: 'น.ส.กาญจนา ศรีสุข', role: 'แคชเชียร์', init: 'กา', bg: 'var(--rose-bg)', fg: 'var(--rose)', lastLogin: 'ยังไม่เคยเข้าสู่ระบบ', active: true, lastPasswordReset: null, pin: '1234' },
+  wittaya: { username: 'wittaya_scale', name: 'นายวิทยา ทองสุข', role: 'พนักงานชั่งของ', init: 'วิ', bg: 'var(--blue-bg)', fg: 'var(--blue)', lastLogin: 'ยังไม่เคยเข้าสู่ระบบ', active: true, lastPasswordReset: null, pin: '5678' },
+  prasert: { username: 'prasert_sort', name: 'นายประเสริฐ แสงทอง', role: 'พนักงานชั่งของ', init: 'ปร', bg: 'var(--amber-bg)', fg: 'var(--amber)', lastLogin: 'ยังไม่เคยเข้าสู่ระบบ', active: true, lastPasswordReset: null, pin: '9012' },
 };
 
 export const INITIAL_ORDER = ['admin', 'kanjana', 'wittaya', 'prasert'];

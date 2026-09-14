@@ -10,13 +10,6 @@ function nowTimeStr() {
   return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
 }
 
-const yesterdayThai = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(Date.now() - 86400000));
-
-const FALLBACK_LOG = [
-  { icon: 'ok', title: 'สอบเทียบสำเร็จ · เครื่องชั่งหลัก', sub: `${yesterdayThai} · 08:15 น. โดยเจ้าของร้าน`, amt: 'คลาดเคลื่อน 0.02 กก.' },
-  { icon: 'warn', title: 'แจ้งเตือนไม่ได้เชื่อมต่อ · เครื่องชั่งหลัก', sub: `${todayThai} · 10:40 น.`, amt: 'แก้ไขแล้ว' },
-];
-
 // Devices a network scan (จำลอง) can discover, one at a time, until the pool runs out —
 // filtered against the current `order` so an already-added device is never "found" twice.
 const DISCOVERABLE_POOL = [
@@ -346,7 +339,8 @@ export default function Scales() {
             ประวัติสอบเทียบและการแจ้งเตือน
           </div>
           <div>
-            {(activity.length > 0 ? activity : FALLBACK_LOG).slice(0, 5).map((log, i) => (
+            {activity.length === 0 && <div className="empty-hint">ยังไม่มีประวัติสอบเทียบ</div>}
+            {activity.slice(0, 5).map((log, i) => (
               <div className="log-row" key={i}>
                 <div
                   className="log-icon"

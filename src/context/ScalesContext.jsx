@@ -1,10 +1,12 @@
 import { createContext, useContext } from 'react';
 import { usePersistentState } from '../lib/persist.js';
 
+// A real deployment keeps the device list as a starting point (renamed/edited later by the
+// shop), but starts with no calibration history — that hasn't happened yet.
 export const INITIAL_DEVICES = {
-  main: { name: 'เครื่องชั่งหลัก', model: 'CAS DB-II 300kg', bg: 'var(--blue-bg)', fg: 'var(--blue)', port: 'COM4', conn: 'สาย USB / RS-232', max: '300 กก.', res: '0.01 กก.', cal: '28 เม.ย. 2567', due: '43 วัน', status: 'on', active: true },
-  dock: { name: 'เครื่องชั่งลานหลังร้าน', model: 'Yamato DP-6900 500kg', bg: 'var(--plum-bg)', fg: 'var(--plum)', port: 'YM-6900-A2', conn: 'Bluetooth', max: '500 กก.', res: '0.1 กก.', cal: '15 เม.ย. 2567', due: '30 วัน', status: 'on', active: false },
-  mobile: { name: 'เครื่องชั่งเคลื่อนที่', model: 'Tanita KD-200 60kg', bg: 'var(--bg)', fg: 'var(--ink-500)', port: 'COM7', conn: 'สาย USB / RS-232', max: '60 กก.', res: '0.005 กก.', cal: '2 มี.ค. 2567', due: 'เลยกำหนดแล้ว', status: 'off', active: false },
+  main: { name: 'เครื่องชั่งหลัก', model: 'CAS DB-II 300kg', bg: 'var(--blue-bg)', fg: 'var(--blue)', port: 'COM4', conn: 'สาย USB / RS-232', max: '300 กก.', res: '0.01 กก.', cal: 'ยังไม่เคยสอบเทียบ', due: '—', status: 'on', active: true },
+  dock: { name: 'เครื่องชั่งลานหลังร้าน', model: 'Yamato DP-6900 500kg', bg: 'var(--plum-bg)', fg: 'var(--plum)', port: 'YM-6900-A2', conn: 'Bluetooth', max: '500 กก.', res: '0.1 กก.', cal: 'ยังไม่เคยสอบเทียบ', due: '—', status: 'on', active: false },
+  mobile: { name: 'เครื่องชั่งเคลื่อนที่', model: 'Tanita KD-200 60kg', bg: 'var(--bg)', fg: 'var(--ink-500)', port: 'COM7', conn: 'สาย USB / RS-232', max: '60 กก.', res: '0.005 กก.', cal: 'ยังไม่เคยสอบเทียบ', due: '—', status: 'off', active: false },
 };
 
 export const INITIAL_ORDER = ['main', 'dock', 'mobile'];

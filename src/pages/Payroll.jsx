@@ -32,12 +32,6 @@ const OTHER_REASONS = [
   { id: 'other', label: 'อื่นๆ (ระบุเอง)' },
 ];
 
-const FALLBACK_HISTORY = [
-  { no: 'PV670515-003', name: 'นายวิทยา', amount: '฿3,000.00' },
-  { no: 'PV670515-002', name: 'นายสมชาย', amount: '฿2,500.00' },
-  { no: 'PV670515-001', name: 'น.ส.กาญจนา', amount: '฿3,250.00' },
-];
-
 function money(n) {
   return '฿' + (Number(n) || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -681,12 +675,13 @@ export default function Payroll() {
               <IconReceipt />
               ประวัติจ่ายล่าสุด
             </div>
-            {(payHistory.length > 0 ? payHistory : FALLBACK_HISTORY).slice(0, 3).map((p, i) => (
+            {payHistory.length === 0 && <div className="empty-hint">ยังไม่มีประวัติการจ่าย</div>}
+            {payHistory.slice(0, 3).map((p, i) => (
               <div className="mini-stat-row" key={i}>
                 <span>
-                  {p.no} · {p.staffName || p.name}
+                  {p.no} · {p.staffName}
                 </span>
-                <span className="n">{p.net !== undefined ? money(p.net) : p.amount}</span>
+                <span className="n">{money(p.net)}</span>
               </div>
             ))}
           </div>

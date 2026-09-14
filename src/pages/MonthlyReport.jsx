@@ -2,24 +2,12 @@ import { useMemo } from 'react';
 import { IconCalendarBars, IconDownload, IconPrint, IconCategory, IconUsers, IconCash, IconClockHistory } from '../icons.jsx';
 import { exportCsv } from '../lib/csvExport.js';
 import { useSettings } from '../context/SettingsContext.jsx';
-import { useReceipts, INITIAL_ORDER as RECEIPTS_INITIAL_ORDER } from '../context/ReceiptsContext.jsx';
+import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import './MonthlyReport.css';
 
-// This app has no real day-by-day receipt history to compute a true 31-day trend from
-// (the seed data only represents "today"), so this daily chart stays as reference/
-// illustrative figures — same documented limitation as the 12-month chart on the
-// Annual Report page.
-// Same baseline convention as the 512450 baht / 186 receipt figures below, at the same
-// ~23.3 baht/kg rate the historical months on TaxReport.jsx/AnnualReport.jsx average —
-// without this, "this month" weight came out as just the seed receipts' raw ~470 kg with
-// no baseline at all, next to a baseline'd baht figure, implying an absurd ~1,090 baht/kg.
-const MONTH_BASELINE_WEIGHT = 21955;
-
 const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1));
-const THIS_MONTH = [8, 12, 15, 11, 17, 22, 19, 14, 10, 16, 21, 25, 20, 18, 23, 28, 24, 19, 15, 20, 26, 30, 27, 22, 18, 24, 29, 33, 28, 24, 20].map((v) => v * 750);
-const LAST_MONTH = [9, 11, 13, 10, 14, 18, 17, 13, 9, 14, 18, 21, 19, 15, 20, 24, 21, 17, 13, 17, 22, 26, 24, 19, 15, 20, 25, 28, 24, 20, 17].map((v) => v * 720);
 
 function parseMoney(s) {
   return parseFloat(String(s).replace(/[^\d.]/g, '')) || 0;
@@ -52,7 +40,7 @@ function makeLineChart(seriesA, seriesB, labels) {
   const allVals = [...seriesA, ...seriesB];
   const min = Math.min(...allVals) * 0.9,
     max = Math.max(...allVals) * 1.05;
-  const range = max - min;
+  const range = max - min || 1; // avoid a divide-by-zero flat line when there's no data yet
   const stepX = (w - padL - padR) / (seriesA.length - 1);
   const toY = (v) => padT + (h - padT - padB) - ((v - min) / range) * (h - padT - padB);
   const ptsA = seriesA.map((v, i) => `${(padL + i * stepX).toFixed(1)},${toY(v).toFixed(1)}`);
@@ -93,23 +81,41 @@ export default function MonthlyReport() {
   const { receipts, order: receiptOrder } = useReceipts();
   const { products } = useProducts();
   const { order: staffOrder, payHistory } = usePayroll();
-  const chart = useMemo(() => makeLineChart(THIS_MONTH, LAST_MONTH, DAYS), []);
 
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
-  // Same "current month" convention used on Dashboard/Receipts/TaxReport: seed receipts
-  // are this month's baseline, anything added beyond that baseline extends it for real.
-  // A voided receipt shouldn't still count toward revenue, so the delta is active-only.
-  const newReceiptIds = receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id));
-  const newActiveReceiptIds = newReceiptIds.filter((id) => receipts[id].status !== 'void');
-  const monthTotal = 512450 + newActiveReceiptIds.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
-  const monthCount = 186 + newActiveReceiptIds.length;
-  const monthWeight = MONTH_BASELINE_WEIGHT + newActiveReceiptIds.reduce((s, id) => s + parseWeightKg(receipts[id].weight), 0);
+  // Real calendar-month scoping — receipts persist indefinitely, so without this "this
+  // month" would silently become an all-time total once the shop's been running a while.
+  const now = new Date();
+  const monthActiveReceipts = activeReceipts.filter((id) => {
+    const [y, m] = (receipts[id].date || '').split('-').map(Number);
+    return y === now.getFullYear() && m === now.getMonth() + 1;
+  });
+  const monthTotal = monthActiveReceipts.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
+  const monthCount = monthActiveReceipts.length;
+  const monthWeight = monthActiveReceipts.reduce((s, id) => s + parseWeightKg(receipts[id].weight), 0);
   const totalDeductionKg = activeReceipts.reduce((s, id) => s + (receipts[id].deductionWeight || 0), 0);
+
+  // Real day-by-day chart built from each receipt's actual date, grouped into this month
+  // vs. the previous calendar month, instead of fixed illustrative demo figures.
+  const chart = useMemo(() => {
+    const thisM = { y: now.getFullYear(), m: now.getMonth() };
+    const lastDate = new Date(thisM.y, thisM.m - 1, 1);
+    const lastM = { y: lastDate.getFullYear(), m: lastDate.getMonth() };
+    const thisSeries = Array(31).fill(0);
+    const lastSeries = Array(31).fill(0);
+    for (const id of activeReceipts) {
+      const [y, m, d] = (receipts[id].date || '').split('-').map(Number);
+      if (!y || !d) continue;
+      if (y === thisM.y && m === thisM.m + 1) thisSeries[d - 1] += parseMoney(receipts[id].total);
+      else if (y === lastM.y && m === lastM.m + 1) lastSeries[d - 1] += parseMoney(receipts[id].total);
+    }
+    return makeLineChart(thisSeries, lastSeries, DAYS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeReceipts, receipts]);
   // Real payroll payments only, scoped to this calendar month — payHistory persists
   // indefinitely, so summing it unfiltered would silently pull in prior months' wages too
   // once payroll has run more than once, understating "กำไรสุทธิเดือนนี้". Mirrors
   // PayrollReport.jsx's monthKeyOf bucketing.
-  const now = new Date();
   const wagesPaid = payHistory
     .filter((p) => {
       const d = new Date(p.paidAt);
@@ -120,7 +126,7 @@ export default function MonthlyReport() {
 
   const categoryRows = useMemo(() => {
     const byCat = {};
-    for (const id of activeReceipts) {
+    for (const id of monthActiveReceipts) {
       for (const it of receipts[id].items || []) {
         const product = Object.values(products).find((p) => p.name === it.n);
         const cat = product?.cat || 'อื่นๆ';
@@ -132,18 +138,18 @@ export default function MonthlyReport() {
     return Object.entries(byCat)
       .map(([name, c]) => ({ name, ...c }))
       .sort((a, b) => b.amt - a.amt);
-  }, [activeReceipts, receipts, products]);
+  }, [monthActiveReceipts, receipts, products]);
 
   const topCustomers = useMemo(() => {
     const byCust = {};
-    for (const id of activeReceipts) {
+    for (const id of monthActiveReceipts) {
       const r = receipts[id];
       if (!byCust[r.cust]) byCust[r.cust] = { amt: 0, count: 0 };
       byCust[r.cust].amt += parseMoney(r.total);
       byCust[r.cust].count += 1;
     }
     return Object.entries(byCust).sort((a, b) => b[1].amt - a[1].amt).slice(0, 3);
-  }, [activeReceipts, receipts]);
+  }, [monthActiveReceipts, receipts]);
 
   function handleExport() {
     exportCsv(

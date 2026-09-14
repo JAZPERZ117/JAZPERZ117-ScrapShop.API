@@ -15,22 +15,26 @@ function parseVisits(v) {
 describe('CustomersContext purchase/reversal round trip', () => {
   it('reversePurchase undoes exactly what recordPurchase applied', () => {
     const { result } = renderHook(() => useCustomers(), { wrapper: CustomersProvider });
-    const before = result.current.customers.somchai;
+    let id;
+    act(() => {
+      id = result.current.addCustomer({ name: 'คุณทดสอบ', phone: '000-000-0000' }).id;
+    });
+    const before = result.current.customers[id];
     const beforeWeight = parseWeightKg(before.weight);
     const beforeTotal = parseMoney(before.total);
     const beforeVisits = parseVisits(before.visits);
 
     act(() =>
-      result.current.recordPurchase('somchai', { weightKg: 12.5, amount: 890, receiptNo: 'RC-TEST-001', timeStr: '10:00 น.' })
+      result.current.recordPurchase(id, { weightKg: 12.5, amount: 890, receiptNo: 'RC-TEST-001', timeStr: '10:00 น.' })
     );
-    const afterPurchase = result.current.customers.somchai;
+    const afterPurchase = result.current.customers[id];
     expect(parseWeightKg(afterPurchase.weight)).toBeCloseTo(beforeWeight + 12.5, 2);
     expect(parseMoney(afterPurchase.total)).toBeCloseTo(beforeTotal + 890, 2);
     expect(parseVisits(afterPurchase.visits)).toBe(beforeVisits + 1);
     expect(afterPurchase.hist.some((h) => h.no === 'RC-TEST-001')).toBe(true);
 
-    act(() => result.current.reversePurchase('somchai', { weightKg: 12.5, amount: 890, receiptNo: 'RC-TEST-001' }));
-    const afterReversal = result.current.customers.somchai;
+    act(() => result.current.reversePurchase(id, { weightKg: 12.5, amount: 890, receiptNo: 'RC-TEST-001' }));
+    const afterReversal = result.current.customers[id];
     expect(parseWeightKg(afterReversal.weight)).toBeCloseTo(beforeWeight, 2);
     expect(parseMoney(afterReversal.total)).toBeCloseTo(beforeTotal, 2);
     expect(parseVisits(afterReversal.visits)).toBe(beforeVisits);
@@ -41,9 +45,13 @@ describe('CustomersContext purchase/reversal round trip', () => {
 
   it('reversePurchase never drives weight/total/visits negative', () => {
     const { result } = renderHook(() => useCustomers(), { wrapper: CustomersProvider });
+    let id;
+    act(() => {
+      id = result.current.addCustomer({ name: 'คุณทดสอบ', phone: '000-000-0000' }).id;
+    });
 
-    act(() => result.current.reversePurchase('somchai', { weightKg: 999999, amount: 999999, receiptNo: 'RC-NONE' }));
-    const c = result.current.customers.somchai;
+    act(() => result.current.reversePurchase(id, { weightKg: 999999, amount: 999999, receiptNo: 'RC-NONE' }));
+    const c = result.current.customers[id];
     expect(parseWeightKg(c.weight)).toBeGreaterThanOrEqual(0);
     expect(parseMoney(c.total)).toBeGreaterThanOrEqual(0);
     expect(parseVisits(c.visits)).toBeGreaterThanOrEqual(0);

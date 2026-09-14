@@ -9,7 +9,7 @@ import {
   IconClockHistory,
   IconCheck,
 } from '../icons.jsx';
-import { useReceipts, INITIAL_ORDER as RECEIPTS_INITIAL_ORDER } from '../context/ReceiptsContext.jsx';
+import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useCustomers, INITIAL_ORDER as CUSTOMERS_INITIAL_ORDER } from '../context/CustomersContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import './Dashboard.css';
@@ -47,18 +47,23 @@ export default function Dashboard() {
   const { order: customerOrder } = useCustomers();
   const { products } = useProducts();
 
-  // "This month" here follows the same convention used on the Receipts page: the seed
-  // receipts represent this month's baseline business, and anything added beyond that
-  // baseline is real growth on top of it — so these numbers move as real receipts come in.
-  const newReceiptIds = useMemo(() => receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id)), [receiptOrder]);
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
-  const newActiveReceiptIds = useMemo(() => newReceiptIds.filter((id) => receipts[id].status !== 'void'), [newReceiptIds, receipts]);
   // "วันนี้" cards need the actual date filter on top of "active" — active receipts alone are
   // every non-void receipt ever, which would make these stats only ever grow, never reset.
   const todayActiveReceipts = useMemo(() => activeReceipts.filter((id) => receipts[id].date === todayISO()), [activeReceipts, receipts]);
   const todayTotal = useMemo(() => todayActiveReceipts.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0), [todayActiveReceipts, receipts]);
-  const monthCount = 186 + newActiveReceiptIds.length;
-  const monthTotal = 512450 + newActiveReceiptIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
+  // "เดือนนี้" needs its own calendar-month filter too, not just "active" — receipts persist
+  // indefinitely, so without this, once the shop has been running more than a month this would
+  // silently become an all-time total instead of resetting every month.
+  const monthActiveReceipts = useMemo(() => {
+    const now = new Date();
+    return activeReceipts.filter((id) => {
+      const [y, m] = (receipts[id].date || '').split('-').map(Number);
+      return y === now.getFullYear() && m === now.getMonth() + 1;
+    });
+  }, [activeReceipts, receipts]);
+  const monthCount = monthActiveReceipts.length;
+  const monthTotal = monthActiveReceipts.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
   const cashOnHand = useMemo(
     () => todayActiveReceipts.filter((id) => receipts[id].method === 'เงินสด').reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
     [todayActiveReceipts, receipts]
@@ -83,7 +88,7 @@ export default function Dashboard() {
       });
   }, [activeReceipts, receipts, products]);
 
-  const latestNewReceipt = receipts[newReceiptIds[0]];
+  const latestNewReceipt = receipts[receiptOrder[0]];
   // Voided receipts can be voided out of creation order, so pick by voidedAt (when
   // present) rather than receiptOrder's creation-time ordering — otherwise voiding an
   // older receipt after a newer one is already void would keep showing the older event.

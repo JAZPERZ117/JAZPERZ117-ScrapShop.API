@@ -13,13 +13,16 @@ const ICON_MAP = {
   box: IconBox,
 };
 
+// A real deployment keeps the price list as a starting catalog (renamed/edited later by the
+// shop), but starts with zero stock and no price-change history — nothing has been bought
+// or tracked yet.
 export const INITIAL_PRODUCTS_RAW = {
-  iron: { name: 'เหล็ก', cat: 'โลหะ', iconKey: 'magnet', bg: 'var(--amber-bg)', fg: 'var(--amber)', price: 17.0, change: '+2.4%', dir: 'up', stock: '3,210 กก.', stockPct: 78, active: true, spark: [16.2, 16.5, 16.4, 16.8, 16.5, 16.6, 17.0], hist: [{ d: '15 พ.ค. 2567', v: '฿17.00' }, { d: '14 พ.ค. 2567', v: '฿16.60' }, { d: '13 พ.ค. 2567', v: '฿16.50' }, { d: '12 พ.ค. 2567', v: '฿16.80' }] },
-  copper: { name: 'ทองแดง', cat: 'โลหะ', iconKey: 'circle', bg: 'var(--rose-bg)', fg: 'var(--rose)', price: 218.0, change: '+4.1%', dir: 'up', stock: '86 กก.', stockPct: 32, active: true, spark: [198, 202, 205, 209, 212, 209, 218], hist: [{ d: '15 พ.ค. 2567', v: '฿218.00' }, { d: '14 พ.ค. 2567', v: '฿209.40' }, { d: '13 พ.ค. 2567', v: '฿212.00' }, { d: '12 พ.ค. 2567', v: '฿205.00' }] },
-  cardboard: { name: 'กระดาษลัง', cat: 'กระดาษ', iconKey: 'cardboard', bg: 'var(--blue-bg)', fg: 'var(--blue)', price: 10.0, change: '0.0%', dir: 'flat', stock: '1,840 กก.', stockPct: 64, active: true, spark: [10, 10, 10, 9.8, 10, 10, 10], hist: [{ d: '15 พ.ค. 2567', v: '฿10.00' }, { d: '14 พ.ค. 2567', v: '฿10.00' }, { d: '13 พ.ค. 2567', v: '฿10.00' }, { d: '12 พ.ค. 2567', v: '฿9.80' }] },
-  plastic: { name: 'ขวดพลาสติก', cat: 'พลาสติก', iconKey: 'bottle', bg: 'var(--plum-bg)', fg: 'var(--plum)', price: 12.4, change: '−1.6%', dir: 'down', stock: '920 กก.', stockPct: 45, active: true, spark: [13.1, 13.0, 12.8, 12.9, 12.6, 12.6, 12.4], hist: [{ d: '15 พ.ค. 2567', v: '฿12.40' }, { d: '14 พ.ค. 2567', v: '฿12.60' }, { d: '13 พ.ค. 2567', v: '฿12.60' }, { d: '12 พ.ค. 2567', v: '฿12.90' }] },
-  aluminum: { name: 'อลูมิเนียม', cat: 'โลหะ', iconKey: 'circle', bg: 'var(--green-100)', fg: 'var(--green-700)', price: 48.0, change: '+1.1%', dir: 'up', stock: '412 กก.', stockPct: 55, active: true, spark: [45, 46, 46.5, 47, 46.8, 47.5, 48], hist: [{ d: '15 พ.ค. 2567', v: '฿48.00' }, { d: '14 พ.ค. 2567', v: '฿47.50' }, { d: '13 พ.ค. 2567', v: '฿46.80' }, { d: '12 พ.ค. 2567', v: '฿47.00' }] },
-  stainless: { name: 'สแตนเลส', cat: 'โลหะ', iconKey: 'device', bg: 'var(--teal-bg, #E4F6F4)', fg: 'var(--teal, #0E8E82)', price: 22.5, change: '0.0%', dir: 'flat', stock: '140 กก.', stockPct: 18, active: false, spark: [22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5], hist: [{ d: '15 พ.ค. 2567', v: '฿22.50' }, { d: '14 พ.ค. 2567', v: '฿22.50' }, { d: '13 พ.ค. 2567', v: '฿22.50' }, { d: '12 พ.ค. 2567', v: '฿22.50' }] },
+  iron: { name: 'เหล็ก', cat: 'โลหะ', iconKey: 'magnet', bg: 'var(--amber-bg)', fg: 'var(--amber)', price: 17.0, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0], hist: [] },
+  copper: { name: 'ทองแดง', cat: 'โลหะ', iconKey: 'circle', bg: 'var(--rose-bg)', fg: 'var(--rose)', price: 218.0, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [218, 218, 218, 218, 218, 218, 218], hist: [] },
+  cardboard: { name: 'กระดาษลัง', cat: 'กระดาษ', iconKey: 'cardboard', bg: 'var(--blue-bg)', fg: 'var(--blue)', price: 10.0, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [10, 10, 10, 10, 10, 10, 10], hist: [] },
+  plastic: { name: 'ขวดพลาสติก', cat: 'พลาสติก', iconKey: 'bottle', bg: 'var(--plum-bg)', fg: 'var(--plum)', price: 12.4, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [12.4, 12.4, 12.4, 12.4, 12.4, 12.4, 12.4], hist: [] },
+  aluminum: { name: 'อลูมิเนียม', cat: 'โลหะ', iconKey: 'circle', bg: 'var(--green-100)', fg: 'var(--green-700)', price: 48.0, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [48, 48, 48, 48, 48, 48, 48], hist: [] },
+  stainless: { name: 'สแตนเลส', cat: 'โลหะ', iconKey: 'device', bg: 'var(--teal-bg, #E4F6F4)', fg: 'var(--teal, #0E8E82)', price: 22.5, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: false, spark: [22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5], hist: [] },
 };
 
 export const INITIAL_ORDER = ['iron', 'copper', 'cardboard', 'plastic', 'aluminum', 'stainless'];

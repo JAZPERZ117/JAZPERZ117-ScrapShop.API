@@ -1,42 +1,15 @@
 import { useMemo } from 'react';
 import { IconCalendarBars, IconDownload, IconPrint, IconCategory, IconClockHistory, IconUsers } from '../icons.jsx';
 import { exportCsv } from '../lib/csvExport.js';
-import { useReceipts, INITIAL_ORDER as RECEIPTS_INITIAL_ORDER } from '../context/ReceiptsContext.jsx';
+import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useCustomers, INITIAL_ORDER as CUSTOMERS_INITIAL_ORDER } from '../context/CustomersContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import './AnnualReport.css';
 
-// Jan-Apr are historical reference figures (same convention as the Tax Report page — this
-// app has no real date-stamped receipt history for past months); adding the real current
-// month on top gives a genuine, if partial, year-to-date total instead of a frozen number.
-const HISTORICAL_MONTHLY_AMT = [402300, 384100, 452800, 396950];
-const HISTORICAL_MONTHLY_WEIGHT = [17240, 16510, 19320, 17020];
-const HISTORICAL_MONTHLY_RECEIPTS = [142, 138, 151, 125];
-
-// Same baseline convention as the 512450 baht / 186 receipt figures below, at the same
-// ~23.3 baht/kg rate the historical months above average — without this, "current month"
-// weight came out as just the seed receipts' raw ~470 kg with no baseline at all, next to
-// a baseline'd baht figure, implying an absurd ~1,090 baht/kg for the current month only.
-const CURRENT_MONTH_BASELINE_WEIGHT = 21955;
-
-// This app has no real month-by-month receipt history to compute a true 12-month trend
-// from, so the monthly chart and quarter cards below stay as historical reference figures.
-const MONTHS = [
-  { m: 'ม.ค.', v: 145, pct: 52 },
-  { m: 'ก.พ.', v: 138, pct: 49 },
-  { m: 'มี.ค.', v: 162, pct: 58 },
-  { m: 'เม.ย.', v: 171, pct: 61 },
-  { m: 'พ.ค.', v: 184, pct: 66, peak: true },
-  { m: 'มิ.ย.', v: 0, pct: 6, future: true },
-  { m: 'ก.ค.', v: 0, pct: 6, future: true },
-  { m: 'ส.ค.', v: 0, pct: 6, future: true },
-  { m: 'ก.ย.', v: 0, pct: 6, future: true },
-  { m: 'ต.ค.', v: 0, pct: 6, future: true },
-  { m: 'พ.ย.', v: 0, pct: 6, future: true },
-  { m: 'ธ.ค.', v: 0, pct: 6, future: true },
-];
+const MONTH_LABELS_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+const MONTH_LABELS_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 
 function parseMoney(s) {
   return parseFloat(String(s).replace(/[^\d.]/g, '')) || 0;
@@ -64,22 +37,71 @@ export default function AnnualReport() {
   const { settings } = useSettings();
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
 
-  // Same "current month" convention used on Dashboard/Receipts/MonthlyReport/TaxReport:
-  // seed receipts are this month's baseline, and anything added beyond it (excluding
-  // voided receipts) extends it for real.
-  const newReceiptIds = receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id));
-  const newActiveReceiptIds = newReceiptIds.filter((id) => receipts[id].status !== 'void');
-  const currentMonthAmt = 512450 + newActiveReceiptIds.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
-  const currentMonthWeight = CURRENT_MONTH_BASELINE_WEIGHT + newActiveReceiptIds.reduce((s, id) => s + parseWeightKg(receipts[id].weight), 0);
-  const currentMonthReceiptCount = 186 + newActiveReceiptIds.length;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonthIndex = now.getMonth();
 
-  const ytdRevenue = HISTORICAL_MONTHLY_AMT.reduce((a, b) => a + b, 0) + currentMonthAmt;
-  const ytdWeight = HISTORICAL_MONTHLY_WEIGHT.reduce((a, b) => a + b, 0) + currentMonthWeight;
-  const ytdReceiptCount = HISTORICAL_MONTHLY_RECEIPTS.reduce((a, b) => a + b, 0) + currentMonthReceiptCount;
+  // Every receipt now carries a real date, so the year-to-date figures and monthly chart
+  // are computed directly from actual data instead of a "historical demo months + real
+  // current month" baseline — a real shop's first year starts with every month at zero.
+  const yearActiveReceipts = useMemo(
+    () =>
+      activeReceipts.filter((id) => {
+        const [y] = (receipts[id].date || '').split('-').map(Number);
+        return y === currentYear;
+      }),
+    [activeReceipts, receipts, currentYear]
+  );
+
+  const monthlyBreakdown = useMemo(() => {
+    const months = Array.from({ length: 12 }, () => ({ amt: 0, weight: 0, count: 0 }));
+    for (const id of yearActiveReceipts) {
+      const [, m] = receipts[id].date.split('-').map(Number);
+      months[m - 1].amt += parseMoney(receipts[id].total);
+      months[m - 1].weight += parseWeightKg(receipts[id].weight);
+      months[m - 1].count += 1;
+    }
+    return months;
+  }, [yearActiveReceipts, receipts]);
+
+  const ytdRevenue = monthlyBreakdown.reduce((s, m) => s + m.amt, 0);
+  const ytdWeight = monthlyBreakdown.reduce((s, m) => s + m.weight, 0);
+  const ytdReceiptCount = monthlyBreakdown.reduce((s, m) => s + m.count, 0);
+
+  const MONTHS = useMemo(() => {
+    const maxAmt = Math.max(...monthlyBreakdown.map((m) => m.amt), 1);
+    return monthlyBreakdown.map((m, i) => {
+      const isFuture = i > currentMonthIndex;
+      return {
+        m: MONTH_LABELS_SHORT[i],
+        v: Math.round(m.amt / 1000),
+        pct: isFuture ? 6 : Math.max(Math.round((m.amt / maxAmt) * 100), 6),
+        peak: !isFuture && m.amt > 0 && m.amt === maxAmt,
+        future: isFuture,
+      };
+    });
+  }, [monthlyBreakdown, currentMonthIndex]);
+
+  const quarters = useMemo(() => {
+    return [0, 1, 2, 3].map((q) => {
+      const startMonth = q * 3;
+      const monthsInQ = monthlyBreakdown.slice(startMonth, startMonth + 3);
+      const isFuture = startMonth > currentMonthIndex;
+      return { total: monthsInQ.reduce((s, m) => s + m.amt, 0), partial: !isFuture && startMonth + 2 > currentMonthIndex, future: isFuture };
+    });
+  }, [monthlyBreakdown, currentMonthIndex]);
+
+  const topMonths = useMemo(() => {
+    return monthlyBreakdown
+      .map((m, i) => ({ ...m, i }))
+      .filter((m) => m.i <= currentMonthIndex && m.amt > 0)
+      .sort((a, b) => b.amt - a.amt)
+      .slice(0, 3);
+  }, [monthlyBreakdown, currentMonthIndex]);
+
   // Real payroll payments only, scoped to this year — payHistory persists indefinitely, so
   // summing it unfiltered would silently pull in wages paid in a prior year too once any
   // exist, understating "กำไรสุทธิทั้งปี". Mirrors PayrollReport.jsx's yearKeyOf bucketing.
-  const currentYear = new Date().getFullYear();
   const wagesPaid = payHistory
     .filter((p) => new Date(p.paidAt).getFullYear() === currentYear)
     .reduce((s, p) => s + (p.net || 0), 0);
@@ -88,7 +110,7 @@ export default function AnnualReport() {
 
   const breakdown = useMemo(() => {
     const byCat = {};
-    for (const id of activeReceipts) {
+    for (const id of yearActiveReceipts) {
       for (const it of receipts[id].items || []) {
         const product = Object.values(products).find((p) => p.name === it.n);
         const cat = product?.cat || 'อื่นๆ';
@@ -101,18 +123,18 @@ export default function AnnualReport() {
     return Object.entries(byCat)
       .map(([name, c]) => ({ name, ...c, pct: Math.round((c.amt / total) * 100) }))
       .sort((a, b) => b.amt - a.amt);
-  }, [activeReceipts, receipts, products]);
+  }, [yearActiveReceipts, receipts, products]);
 
   const topCustomers = useMemo(() => {
     const byCust = {};
-    for (const id of activeReceipts) {
+    for (const id of yearActiveReceipts) {
       const r = receipts[id];
       if (!byCust[r.cust]) byCust[r.cust] = { amt: 0, count: 0 };
       byCust[r.cust].amt += parseMoney(r.total);
       byCust[r.cust].count += 1;
     }
     return Object.entries(byCust).sort((a, b) => b[1].amt - a[1].amt).slice(0, 3);
-  }, [activeReceipts, receipts]);
+  }, [yearActiveReceipts, receipts]);
 
   function handleExport() {
     exportCsv(
@@ -222,28 +244,20 @@ export default function AnnualReport() {
             </div>
 
             <div className="quarter-grid">
-              <div className="quarter-card">
-                <div className="q">ไตรมาส 1</div>
-                <div className="v">฿445,000</div>
-              </div>
-              <div className="quarter-card">
-                <div className="q">ไตรมาส 2 (บางส่วน)</div>
-                <div className="v">฿355,000</div>
-              </div>
-              <div className="quarter-card">
-                <div className="q">ไตรมาส 3</div>
-                <div className="v">—</div>
-                <div className="c" style={{ color: 'var(--ink-300)' }}>
-                  ยังไม่ถึง
+              {quarters.map((q, i) => (
+                <div className="quarter-card" key={i}>
+                  <div className="q">
+                    ไตรมาส {i + 1}
+                    {q.partial ? ' (บางส่วน)' : ''}
+                  </div>
+                  <div className="v">{q.future ? '—' : money(q.total)}</div>
+                  {q.future && (
+                    <div className="c" style={{ color: 'var(--ink-300)' }}>
+                      ยังไม่ถึง
+                    </div>
+                  )}
                 </div>
-              </div>
-              <div className="quarter-card">
-                <div className="q">ไตรมาส 4</div>
-                <div className="v">—</div>
-                <div className="c" style={{ color: 'var(--ink-300)' }}>
-                  ยังไม่ถึง
-                </div>
-              </div>
+              ))}
             </div>
           </div>
 
@@ -298,25 +312,17 @@ export default function AnnualReport() {
               <IconClockHistory />
               เดือนยอดสูงสุดปีนี้
             </div>
-            <div className="mini-stat-row">
-              <div>
-                <div className="name">พฤษภาคม {CURRENT_YEAR_BE}</div>
-                <div className="sub">เดือนล่าสุดในข้อมูลอ้างอิง</div>
+            {topMonths.length === 0 && <div className="empty-hint">ยังไม่มีข้อมูล</div>}
+            {topMonths.map((m) => (
+              <div className="mini-stat-row" key={m.i}>
+                <div>
+                  <div className="name">
+                    {MONTH_LABELS_FULL[m.i]} {CURRENT_YEAR_BE}
+                  </div>
+                </div>
+                <span className="n">{money(m.amt)}</span>
               </div>
-              <span className="n">฿184,000</span>
-            </div>
-            <div className="mini-stat-row">
-              <div>
-                <div className="name">เมษายน {CURRENT_YEAR_BE}</div>
-              </div>
-              <span className="n">฿171,000</span>
-            </div>
-            <div className="mini-stat-row">
-              <div>
-                <div className="name">มีนาคม {CURRENT_YEAR_BE}</div>
-              </div>
-              <span className="n">฿162,000</span>
-            </div>
+            ))}
           </div>
 
           <div className="card card-pad">
