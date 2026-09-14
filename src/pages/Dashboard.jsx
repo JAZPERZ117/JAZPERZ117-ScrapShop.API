@@ -8,11 +8,26 @@ import {
   IconCash,
   IconClockHistory,
   IconCheck,
+  IconBox,
+  IconScale,
+  IconX,
 } from '../icons.jsx';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useCustomers, INITIAL_ORDER as CUSTOMERS_INITIAL_ORDER } from '../context/CustomersContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
+import { usePersistentState } from '../lib/persist.js';
 import './Dashboard.css';
+
+// Shown only until the shop's first real receipt exists (see `showOnboarding` below) — a
+// brand-new install has nothing purchased, no staff added, and no scale checked yet, so
+// pointing at exactly those three setup pages first is more useful here than a generic
+// "welcome" message.
+const ONBOARDING_STEPS = [
+  { to: '/products', label: 'ตรวจสอบราคาสินค้า', desc: 'ปรับราคารับซื้อแต่ละประเภทให้ตรงกับร้านจริง', Icon: IconBox, bg: 'var(--amber-bg)', fg: 'var(--amber)' },
+  { to: '/payroll', label: 'เพิ่มพนักงาน', desc: 'เพิ่มรายชื่อลูกน้องที่ทำงานในร้าน', Icon: IconUsers, bg: 'var(--plum-bg)', fg: 'var(--plum)' },
+  { to: '/scales', label: 'ตั้งค่าเครื่องชั่ง', desc: 'ตรวจสอบเครื่องชั่งที่ใช้จริงหน้าร้าน', Icon: IconScale, bg: 'var(--blue-bg)', fg: 'var(--blue)' },
+  { to: '/', label: 'เริ่มรับซื้อของเก่า', desc: 'เริ่มรายการรับซื้อและออกใบเสร็จใบแรก', Icon: IconCart, bg: 'var(--green-100)', fg: 'var(--green-700)' },
+];
 
 const todayThai = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', {
   day: 'numeric',
@@ -46,6 +61,11 @@ export default function Dashboard() {
   const { receipts, order: receiptOrder } = useReceipts();
   const { order: customerOrder } = useCustomers();
   const { products } = useProducts();
+  const [onboardingDismissed, setOnboardingDismissed] = usePersistentState('scrapshop_onboarding_dismissed', false);
+  // Once a real receipt exists the shop is clearly up and running, so there's no need to
+  // keep asking — this check alone (not the dismiss flag) is what makes the card disappear
+  // permanently the moment the owner actually starts using the app for real.
+  const showOnboarding = !onboardingDismissed && receiptOrder.length === 0;
 
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
   // "วันนี้" cards need the actual date filter on top of "active" — active receipts alone are
@@ -115,6 +135,32 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {showOnboarding && (
+        <div className="card card-pad section-gap" style={{ background: 'var(--green-50)', border: '1px solid var(--green-100)' }}>
+          <div className="card-head">
+            <div>
+              <div className="card-title">เริ่มต้นใช้งานร้านของคุณ</div>
+              <div className="card-sub">ตั้งค่าเบื้องต้นให้เรียบร้อยก่อนเริ่มรับซื้อของเก่าจริง — ข้ามได้ถ้าตั้งค่าไว้แล้ว</div>
+            </div>
+            <button type="button" className="btn btn-ghost" onClick={() => setOnboardingDismissed(true)}>
+              <IconX />
+              ซ่อน
+            </button>
+          </div>
+          <div className="quick-action-grid">
+            {ONBOARDING_STEPS.map((s) => (
+              <Link to={s.to} className="quick-action-card" key={s.to}>
+                <div className="quick-action-icon" style={{ background: s.bg, color: s.fg }}>
+                  <s.Icon />
+                </div>
+                <div className="quick-action-label">{s.label}</div>
+                <div className="quick-action-desc">{s.desc}</div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="stat-grid">
         <div className="stat-card">

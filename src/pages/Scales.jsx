@@ -244,7 +244,13 @@ export default function Scales() {
             <div className="hero-sub">ความละเอียด {d.res}</div>
           </div>
           <div className="hero-actions">
-            <button type="button" className="hero-btn primary" onClick={simulate} disabled={d.status !== 'on'}>
+            <button
+              type="button"
+              className="hero-btn primary"
+              onClick={simulate}
+              disabled={d.status !== 'on'}
+              title="เว็บเบราว์เซอร์เชื่อมต่อกับเครื่องชั่งจริงโดยตรงไม่ได้ ปุ่มนี้จึงจำลองค่าน้ำหนักไว้สำหรับทดสอบหน้าจอเท่านั้น"
+            >
               <IconPlus />
               วางของบนเครื่องชั่ง (จำลอง)
             </button>
