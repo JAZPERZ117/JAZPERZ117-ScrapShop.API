@@ -104,7 +104,17 @@ export default function Receipts() {
 
   const selected = receipts[selectedId] || receipts[order[0]];
   const selectedStatus = selected?.status;
-  const voidedIds = useMemo(() => order.filter((id) => receipts[id].status === 'void'), [order, receipts]);
+  // The "ยกเลิกเดือนนี้" stat card below is explicitly scoped to this calendar month — without
+  // this filter it would silently show a lifetime total of every voided receipt ever, instead
+  // of resetting every month, same convention as monthActiveOrder just below.
+  const monthVoidedIds = useMemo(() => {
+    const now = new Date();
+    return order.filter((id) => {
+      if (receipts[id].status !== 'void') return false;
+      const [y, m] = (receipts[id].date || '').split('-').map(Number);
+      return y === now.getFullYear() && m === now.getMonth() + 1;
+    });
+  }, [order, receipts]);
 
   // "วันนี้"/"เดือนนี้" stat cards only count active receipts dated today — a voided receipt
   // or one from a previous day shouldn't still add to today's count/revenue, same convention
@@ -130,8 +140,8 @@ export default function Receipts() {
   const reprintCount = activity.filter((a) => a.text.startsWith('พิมพ์ซ้ำ') || a.text.startsWith('ดาวน์โหลด')).length;
   const reprintFromCount = printedIds.length;
   const voidTotal = useMemo(
-    () => voidedIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
-    [voidedIds, receipts]
+    () => monthVoidedIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
+    [monthVoidedIds, receipts]
   );
 
   function logActivity(text) {
@@ -367,7 +377,7 @@ export default function Receipts() {
           </div>
           <div>
             <div className="stat-label">ยกเลิกเดือนนี้</div>
-            <div className="stat-value">{voidedIds.length} ใบ</div>
+            <div className="stat-value">{monthVoidedIds.length} ใบ</div>
             <div className="stat-foot">รวม {money(voidTotal)}</div>
           </div>
         </div>
