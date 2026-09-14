@@ -1,5 +1,5 @@
-import { createContext, useContext, useMemo } from 'react';
-import { usePersistentState } from '../lib/persist.js';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { getToken } from '../lib/auth.js';
 
 // ID cards are flagged as "near expiry" inside this many days of idExpiry (including
 // already-past dates) — renewing a customer's idExpiry date is what clears the warning.
@@ -14,24 +14,46 @@ function daysUntil(dateStr) {
   return Math.round((target - today) / 86400000);
 }
 
-function money(n) {
-  return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function authHeaders() {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` };
 }
 
-// Real deployment: no customers exist yet until the shop actually adds one.
-export const INITIAL_CUSTOMERS = {};
-
+// Real deployment: no customers exist yet until the shop actually adds one. Kept exported —
+// Dashboard.jsx's "new customers" count still diffs against this to mean "not present at
+// install time", which is still every real customer since this has always been empty.
 export const INITIAL_ORDER = [];
-
-export const BLANK_CUSTOMER = {
-  name: '', init: '', bg: 'var(--green-100)', fg: 'var(--green-700)', phone: '', idNumber: '', idExpiry: '', idPhoto: '', addr: 'ยังไม่ได้บันทึกที่อยู่', tag: 'general', weight: '0.00 กก.', total: '฿0.00', visits: '0 ครั้ง', since: 'พ.ค. 2567', lastVisit: 'ยังไม่เคยซื้อขาย', hist: [],
-};
 
 const CustomersContext = createContext(null);
 
 export function CustomersProvider({ children }) {
-  const [customersRaw, setCustomersRaw] = usePersistentState('scrapshop_customers', INITIAL_CUSTOMERS);
-  const [order, setOrder] = usePersistentState('scrapshop_customers_order', INITIAL_ORDER);
+  const [customersRaw, setCustomersRaw] = useState({});
+  const [order, setOrder] = useState([]);
+
+  // Customer records — including ID card numbers and photos — used to live only in this
+  // browser's own localStorage: unencrypted, readable by anyone with DevTools access to the
+  // browser profile, with no login required at all. Now fetched from the real database behind
+  // requireAuth instead, same as PIN accounts already were.
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/customers', { headers: authHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+      const map = {};
+      const ord = [];
+      for (const c of data.customers) {
+        map[c.id] = c;
+        ord.push(c.id);
+      }
+      setCustomersRaw(map);
+      setOrder(ord);
+    } catch {
+      // Offline or server down — leave whatever's already loaded rather than clearing it.
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   // idWarn/idDaysLeft are derived live from idExpiry vs today, not stored — so renewing
   // a customer's ID (editing idExpiry to a future date) immediately clears the warning
@@ -46,71 +68,86 @@ export function CustomersProvider({ children }) {
     return out;
   }, [customersRaw]);
 
-  function addCustomer({ name, phone }) {
-    const id = `new_${Date.now()}`;
-    // Real creation timestamp — lets pages like DailySummary genuinely tell "added today"
-    // apart from "added at any point since the shop started using the app".
-    const created = { ...BLANK_CUSTOMER, name, phone, init: name.replace('คุณ', '').trim().slice(0, 2) || '?', createdAt: new Date().toISOString() };
-    setCustomersRaw((prev) => ({ ...prev, [id]: created }));
-    setOrder((prev) => [id, ...prev]);
-    return { id, ...created };
+  async function addCustomer({ name, phone, idNumber, idExpiry, idPhoto }) {
+    const res = await fetch('/api/customers', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name, phone, idNumber, idExpiry, idPhoto }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'เพิ่มลูกค้าไม่สำเร็จ');
+    setCustomersRaw((prev) => ({ ...prev, [data.customer.id]: data.customer }));
+    setOrder((prev) => [data.customer.id, ...prev]);
+    return data.customer;
   }
 
-  // Called once per completed purchase (see ScrapPurchase.jsx) so a customer's cumulative
-  // weight/spend/visit count and recent history reflect real transactions instead of
-  // staying frozen at whatever the seed data happened to say.
-  function recordPurchase(id, { weightKg, amount, receiptNo, timeStr }) {
-    if (!id || !customersRaw[id]) return;
-    setCustomersRaw((prev) => {
-      const c = prev[id];
-      const prevWeight = parseFloat(String(c.weight).replace(/[^\d.]/g, '')) || 0;
-      const prevTotal = parseFloat(String(c.total).replace(/[^\d.]/g, '')) || 0;
-      const prevVisits = parseInt(String(c.visits).replace(/[^\d]/g, ''), 10) || 0;
-      const hist = [{ no: receiptNo, dt: `วันนี้ · ${timeStr}`, amt: money(amount) }, ...(c.hist || [])].slice(0, 5);
-      return {
-        ...prev,
-        [id]: {
-          ...c,
-          weight: `${(prevWeight + weightKg).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.`,
-          total: money(prevTotal + amount),
-          visits: `${prevVisits + 1} ครั้ง`,
-          lastVisit: `วันนี้ ${timeStr}`,
-          hist,
-        },
-      };
+  async function updateCustomer(id, patch) {
+    const res = await fetch(`/api/customers/${id}`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify(patch),
     });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'บันทึกข้อมูลลูกค้าไม่สำเร็จ');
+    setCustomersRaw((prev) => ({ ...prev, [id]: data.customer }));
+    return data.customer;
   }
 
-  // Inverse of recordPurchase — called when a receipt is voided (see Receipts.jsx) so a
-  // cancelled purchase doesn't permanently overstate the customer's lifetime weight/spend/
-  // visit count. `lastVisit` can't be reconstructed exactly (the prior value was never kept),
-  // so it falls back to whatever history entry is now the most recent, or the "never
-  // purchased" default if none remain.
-  function reversePurchase(id, { weightKg, amount, receiptNo }) {
-    if (!id || !customersRaw[id]) return;
+  async function deleteCustomer(id) {
+    const res = await fetch(`/api/customers/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'ลบลูกค้าไม่สำเร็จ');
+    }
     setCustomersRaw((prev) => {
-      const c = prev[id];
-      if (!c) return prev;
-      const prevWeight = parseFloat(String(c.weight).replace(/[^\d.]/g, '')) || 0;
-      const prevTotal = parseFloat(String(c.total).replace(/[^\d.]/g, '')) || 0;
-      const prevVisits = parseInt(String(c.visits).replace(/[^\d]/g, ''), 10) || 0;
-      const hist = (c.hist || []).filter((h) => h.no !== receiptNo);
-      return {
-        ...prev,
-        [id]: {
-          ...c,
-          weight: `${Math.max(prevWeight - weightKg, 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.`,
-          total: money(Math.max(prevTotal - amount, 0)),
-          visits: `${Math.max(prevVisits - 1, 0)} ครั้ง`,
-          lastVisit: hist[0] ? hist[0].dt : 'ยังไม่เคยซื้อขาย',
-          hist,
-        },
-      };
+      const next = { ...prev };
+      delete next[id];
+      return next;
     });
+    setOrder((prev) => prev.filter((oid) => oid !== id));
+  }
+
+  // Called once per completed purchase (see ScrapPurchase.jsx). Best-effort: the receipt itself
+  // is already saved by the time this runs, so a failure here (e.g. a dropped LAN connection)
+  // shouldn't be surfaced as if the sale itself failed — it only means this customer's
+  // cumulative stats will look stale until the next successful sync.
+  async function recordPurchase(id, { weightKg, amount, receiptNo, timeStr }) {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/customers/${id}/record-purchase`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ weightKg, amount, receiptNo, timeStr }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setCustomersRaw((prev) => ({ ...prev, [id]: data.customer }));
+    } catch {
+      // best-effort, see above
+    }
+  }
+
+  // Inverse of recordPurchase — called when a receipt is voided (see Receipts.jsx).
+  async function reversePurchase(id, { weightKg, amount, receiptNo }) {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/customers/${id}/reverse-purchase`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ weightKg, amount, receiptNo }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setCustomersRaw((prev) => ({ ...prev, [id]: data.customer }));
+    } catch {
+      // best-effort, see recordPurchase
+    }
   }
 
   return (
-    <CustomersContext.Provider value={{ customers, setCustomers: setCustomersRaw, order, setOrder, addCustomer, recordPurchase, reversePurchase }}>
+    <CustomersContext.Provider
+      value={{ customers, order, addCustomer, updateCustomer, deleteCustomer, recordPurchase, reversePurchase, refresh }}
+    >
       {children}
     </CustomersContext.Provider>
   );

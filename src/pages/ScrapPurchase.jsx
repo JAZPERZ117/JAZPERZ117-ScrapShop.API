@@ -271,14 +271,18 @@ export default function ScrapPurchase() {
     setCustQuery('');
   }
 
-  function handleCreateCustomer(e) {
+  async function handleCreateCustomer(e) {
     e.preventDefault();
     if (!newCustName.trim() || !newCustPhone.trim()) return;
-    const created = addCustomer({ name: newCustName.trim(), phone: newCustPhone.trim() });
-    setSelectedCustomer(created);
-    setNewCustName('');
-    setNewCustPhone('');
-    setShowNewCustomer(false);
+    try {
+      const created = await addCustomer({ name: newCustName.trim(), phone: newCustPhone.trim() });
+      setSelectedCustomer(created);
+      setNewCustName('');
+      setNewCustPhone('');
+      setShowNewCustomer(false);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
   function pullWeight() {

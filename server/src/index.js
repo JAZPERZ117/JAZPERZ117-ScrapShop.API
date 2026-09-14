@@ -236,6 +236,139 @@ app.post('/api/pin-login', authLimiter, (req, res) => {
   });
 });
 
+function toApiCustomer(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    init: row.init,
+    bg: row.bg,
+    fg: row.fg,
+    idNumber: row.id_number,
+    idExpiry: row.id_expiry,
+    idPhoto: row.id_photo,
+    addr: row.addr,
+    tag: row.tag,
+    weight: row.weight,
+    total: row.total,
+    visits: row.visits,
+    since: row.since,
+    lastVisit: row.last_visit,
+    hist: JSON.parse(row.hist || '[]'),
+    createdAt: row.created_at,
+  };
+}
+
+function moneyFmt(n) {
+  return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function parseMoneyStr(s) {
+  return parseFloat(String(s).replace(/[^\d.]/g, '')) || 0;
+}
+function parseWeightStr(s) {
+  return parseFloat(String(s).replace(/[^\d.]/g, '')) || 0;
+}
+function parseCountStr(s) {
+  return parseInt(String(s).replace(/[^\d]/g, ''), 10) || 0;
+}
+
+// Every route below requires a valid session (requireAuth, not requireOwner) — any logged-in
+// staff member needs to look up or add a customer mid-sale (see ScrapPurchase.jsx), not just the
+// owner. This is what actually gates ID card numbers/photos behind a login, which nothing did
+// before: the whole point of moving customers off browser localStorage and into this database.
+app.get('/api/customers', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM customers ORDER BY created_at DESC, rowid DESC').all();
+  res.json({ customers: rows.map(toApiCustomer) });
+});
+
+app.post('/api/customers', requireAuth, (req, res) => {
+  const { name, phone, idNumber, idExpiry, idPhoto } = req.body || {};
+  if (!name?.trim()) {
+    return res.status(400).json({ error: 'กรุณากรอกชื่อลูกค้า' });
+  }
+  const id = `cust_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const init = name.trim().replace('คุณ', '').trim().slice(0, 2) || '?';
+  const since = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'short', year: 'numeric' }).format(new Date());
+  db.prepare(
+    `INSERT INTO customers (id, name, phone, init, id_number, id_expiry, id_photo, since)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, name.trim(), (phone || '').trim(), init, (idNumber || '').trim(), idExpiry || '', idPhoto || '', since);
+  const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
+  res.status(201).json({ customer: toApiCustomer(row) });
+});
+
+app.put('/api/customers/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบลูกค้ารายนี้' });
+  const body = req.body || {};
+  const nextName = body.name?.trim() || row.name;
+  db.prepare(
+    `UPDATE customers SET name = ?, init = ?, phone = ?, id_number = ?, id_expiry = ?, id_photo = ?, tag = ? WHERE id = ?`
+  ).run(
+    nextName,
+    body.name?.trim() ? nextName.replace('คุณ', '').trim().slice(0, 2) || row.init : row.init,
+    body.phone !== undefined ? body.phone.trim() : row.phone,
+    body.idNumber !== undefined ? body.idNumber.trim() : row.id_number,
+    body.idExpiry !== undefined ? body.idExpiry : row.id_expiry,
+    body.idPhoto !== undefined ? body.idPhoto : row.id_photo,
+    body.tag !== undefined ? body.tag : row.tag,
+    row.id
+  );
+  res.json({ customer: toApiCustomer(db.prepare('SELECT * FROM customers WHERE id = ?').get(row.id)) });
+});
+
+app.delete('/api/customers/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบลูกค้ารายนี้' });
+  db.prepare('DELETE FROM customers WHERE id = ?').run(row.id);
+  res.json({ ok: true });
+});
+
+// Called once per completed purchase (ScrapPurchase.jsx) so a customer's cumulative
+// weight/spend/visit count and recent history reflect real transactions. Computed server-side
+// (read-modify-write against the row that's already the source of truth) rather than the client
+// sending a precomputed next value, so two devices completing a sale for the same customer at
+// nearly the same moment can't race and silently drop one update.
+app.post('/api/customers/:id/record-purchase', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบลูกค้ารายนี้' });
+  const { weightKg, amount, receiptNo, timeStr } = req.body || {};
+  const hist = [{ no: receiptNo, dt: `วันนี้ · ${timeStr}`, amt: moneyFmt(amount) }, ...JSON.parse(row.hist || '[]')].slice(0, 5);
+  const nextWeight = `${(parseWeightStr(row.weight) + (weightKg || 0)).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.`;
+  const nextTotal = moneyFmt(parseMoneyStr(row.total) + (amount || 0));
+  const nextVisits = `${parseCountStr(row.visits) + 1} ครั้ง`;
+  db.prepare('UPDATE customers SET weight = ?, total = ?, visits = ?, last_visit = ?, hist = ? WHERE id = ?').run(
+    nextWeight,
+    nextTotal,
+    nextVisits,
+    `วันนี้ ${timeStr}`,
+    JSON.stringify(hist),
+    row.id
+  );
+  res.json({ customer: toApiCustomer(db.prepare('SELECT * FROM customers WHERE id = ?').get(row.id)) });
+});
+
+// Inverse of record-purchase — called when a receipt is voided (Receipts.jsx) so a cancelled
+// purchase doesn't permanently overstate the customer's lifetime weight/spend/visit count.
+app.post('/api/customers/:id/reverse-purchase', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบลูกค้ารายนี้' });
+  const { weightKg, amount, receiptNo } = req.body || {};
+  const hist = JSON.parse(row.hist || '[]').filter((h) => h.no !== receiptNo);
+  const nextWeight = `${Math.max(parseWeightStr(row.weight) - (weightKg || 0), 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.`;
+  const nextTotal = moneyFmt(Math.max(parseMoneyStr(row.total) - (amount || 0), 0));
+  const nextVisits = `${Math.max(parseCountStr(row.visits) - 1, 0)} ครั้ง`;
+  db.prepare('UPDATE customers SET weight = ?, total = ?, visits = ?, last_visit = ?, hist = ? WHERE id = ?').run(
+    nextWeight,
+    nextTotal,
+    nextVisits,
+    hist[0] ? hist[0].dt : 'ยังไม่เคยซื้อขาย',
+    JSON.stringify(hist),
+    row.id
+  );
+  res.json({ customer: toApiCustomer(db.prepare('SELECT * FROM customers WHERE id = ?').get(row.id)) });
+});
+
 // React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
 // has to still get index.html from the server (there's no real /receipts file on disk) and let
 // the client-side router take over from there. Registered after every real route above, so it
