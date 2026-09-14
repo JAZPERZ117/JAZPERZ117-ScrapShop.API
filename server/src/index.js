@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const express = require('express');
+const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const bcrypt = require('bcryptjs');
@@ -19,6 +20,12 @@ if (!JWT_SECRET) {
 }
 
 const app = express();
+// Standard hardening headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy, HSTS,
+// etc.) at essentially no cost. contentSecurityPolicy is left off deliberately — the app relies
+// heavily on React's `style={{...}}` prop across every page, and helmet's default CSP would need
+// real page-by-page testing to get right without silently breaking the UI; tightening that is a
+// separate, deliberate piece of work, not something to guess at here.
+app.use(helmet({ contentSecurityPolicy: false }));
 // Same-machine origins, plus browsers loading the frontend from this machine's LAN IP (so a
 // second till/tablet in the shop can use it too) — any port, so Vite picking a different port
 // than 5173 still works. Deliberately scoped to loopback and the private address ranges
