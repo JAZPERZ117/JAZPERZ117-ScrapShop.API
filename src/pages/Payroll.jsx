@@ -107,6 +107,11 @@ export default function Payroll() {
   const [printSnapshot, setPrintSnapshot] = useState(null);
   const weekDates = useMemo(() => thisWeekDates(), []);
 
+  // The app has no resignation-tracking feature at all, so a "ลาออก" count could never be
+  // anything but a hardcoded, permanently-0 placeholder — replaced with a real distinct-role
+  // count of the current roster instead.
+  const roleCount = useMemo(() => new Set(order.map((id) => staff[id].role.split(' · ')[0])).size, [order, staff]);
+
   const s = staff[selectedId];
   const net = Math.max(dailyRate(s.base) * (parseFloat(s.days) || 0) - (parseFloat(s.advance) || 0) + (parseFloat(s.otherAmount) || 0), 0);
   const totalWeeklyDue = useMemo(() => order.reduce((sum, id) => sum + netPay(staff[id]), 0), [order, staff]);
@@ -372,7 +377,7 @@ export default function Payroll() {
           <div>
             <div className="stat-label">ลูกน้องทั้งหมด</div>
             <div className="stat-value">{order.length} คน</div>
-            <div className="stat-foot">ทำงานอยู่ {order.length} · ลาออก 0</div>
+            <div className="stat-foot">{roleCount} ตำแหน่งงาน</div>
           </div>
         </div>
         <div className="stat-card">
