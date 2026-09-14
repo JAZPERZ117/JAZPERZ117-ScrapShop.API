@@ -10,13 +10,6 @@ function nowTimeStr() {
   return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
 }
 
-const yesterdayThai = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(Date.now() - 86400000));
-
-const FALLBACK_LOG = [
-  { icon: 'ok', title: 'สอบเทียบสำเร็จ · เครื่องชั่งหลัก', sub: `${yesterdayThai} · 08:15 น. โดยเจ้าของร้าน`, amt: 'คลาดเคลื่อน 0.02 กก.' },
-  { icon: 'warn', title: 'แจ้งเตือนไม่ได้เชื่อมต่อ · เครื่องชั่งหลัก', sub: `${todayThai} · 10:40 น.`, amt: 'แก้ไขแล้ว' },
-];
-
 // Devices a network scan (จำลอง) can discover, one at a time, until the pool runs out —
 // filtered against the current `order` so an already-added device is never "found" twice.
 const DISCOVERABLE_POOL = [
@@ -122,6 +115,13 @@ export default function Scales() {
   }
 
   function handleRemove(id = selectedId) {
+    // ScrapPurchase.jsx reads `scaleDevices[mainScaleId]` unconditionally, so letting the last
+    // scale device be removed would leave that page with no device to fall back to and crash
+    // it on the next visit.
+    if (order.length <= 1) {
+      setBanner({ type: 'error', text: 'ต้องมีเครื่องชั่งอย่างน้อย 1 เครื่อง ไม่สามารถนำเครื่องสุดท้ายออกได้' });
+      return;
+    }
     const target = devices[id];
     if (!window.confirm(`ยืนยันนำเครื่องชั่ง "${target.name}" ออกจากระบบ?`)) return;
     const remaining = order.filter((oid) => oid !== id);
@@ -244,7 +244,13 @@ export default function Scales() {
             <div className="hero-sub">ความละเอียด {d.res}</div>
           </div>
           <div className="hero-actions">
-            <button type="button" className="hero-btn primary" onClick={simulate} disabled={d.status !== 'on'}>
+            <button
+              type="button"
+              className="hero-btn primary"
+              onClick={simulate}
+              disabled={d.status !== 'on'}
+              title="เว็บเบราว์เซอร์เชื่อมต่อกับเครื่องชั่งจริงโดยตรงไม่ได้ ปุ่มนี้จึงจำลองค่าน้ำหนักไว้สำหรับทดสอบหน้าจอเท่านั้น"
+            >
               <IconPlus />
               วางของบนเครื่องชั่ง (จำลอง)
             </button>
@@ -339,7 +345,8 @@ export default function Scales() {
             ประวัติสอบเทียบและการแจ้งเตือน
           </div>
           <div>
-            {(activity.length > 0 ? activity : FALLBACK_LOG).slice(0, 5).map((log, i) => (
+            {activity.length === 0 && <div className="empty-hint">ยังไม่มีประวัติสอบเทียบ</div>}
+            {activity.slice(0, 5).map((log, i) => (
               <div className="log-row" key={i}>
                 <div
                   className="log-icon"

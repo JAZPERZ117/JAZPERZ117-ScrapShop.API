@@ -1,30 +1,14 @@
 import { useMemo, useState } from 'react';
 import { IconTax, IconPrint, IconUser, IconCalendarBars, IconSplit, IconInfo, IconClockHistory } from '../icons.jsx';
 import { exportCsv } from '../lib/csvExport.js';
-import { useReceipts, INITIAL_ORDER as RECEIPTS_INITIAL_ORDER } from '../context/ReceiptsContext.jsx';
+import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import './TaxReport.css';
 
 const TAX_YEAR_BE = new Date().getFullYear() + 543;
-const THIS_MONTH_LONG = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'long', year: 'numeric' }).format(new Date());
 const THIS_MONTH_SHORT = new Intl.DateTimeFormat('th-TH', { month: 'short' }).format(new Date());
 const YTD_LABEL = `ม.ค.–${THIS_MONTH_SHORT}`;
-
-// Jan-Apr are historical reference figures (this app has no real date-stamped receipt
-// history to compute them from); the current month is replaced below with the real,
-// live total from the Receipts page so at least this month reflects actual system data.
-const HISTORICAL_MONTHLY = [
-  { m: `มกราคม ${TAX_YEAR_BE}`, amt: 402300, weightKg: 17240, receiptCount: 142 },
-  { m: `กุมภาพันธ์ ${TAX_YEAR_BE}`, amt: 384100, weightKg: 16510, receiptCount: 138 },
-  { m: `มีนาคม ${TAX_YEAR_BE}`, amt: 452800, weightKg: 19320, receiptCount: 151 },
-  { m: `เมษายน ${TAX_YEAR_BE}`, amt: 396950, weightKg: 17020, receiptCount: 125 },
-];
-
-// Same baseline convention as the 512450 baht / 186 receipt figures below, at the same
-// ~23.3 baht/kg rate the historical months above average — without this, "current month"
-// weight came out as just the seed receipts' raw ~470 kg with no baseline at all, next to
-// a baseline'd baht figure, implying an absurd ~1,090 baht/kg for the current month only.
-const CURRENT_MONTH_BASELINE_WEIGHT = 21955;
+const MONTH_LABELS_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 
 function money(n) {
   return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -71,25 +55,38 @@ export default function TaxReport() {
   const { receipts, order: receiptOrder } = useReceipts();
   const { settings } = useSettings();
 
-  // Same "current month" convention used on Dashboard/Receipts: the seed receipts are
-  // this month's baseline, and anything added beyond that baseline extends it for real.
-  // A voided receipt shouldn't still inflate taxable income, so the delta is active-only.
-  const newReceiptIds = receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id));
-  const newActiveReceiptIds = newReceiptIds.filter((id) => receipts[id].status !== 'void');
-  const currentMonthAmt = 512450 + newActiveReceiptIds.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
-  const currentMonthWeight = CURRENT_MONTH_BASELINE_WEIGHT + newActiveReceiptIds.reduce((s, id) => s + parseWeightKg(receipts[id].weight), 0);
-  const currentMonthReceiptCount = 186 + newActiveReceiptIds.length;
+  // Every receipt now carries a real date, so each month's row is computed directly from
+  // actual data instead of a "historical demo months + real current month" baseline — a
+  // real shop's first year starts with every month at zero.
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonthIndex = now.getMonth();
+  // ภงด.94 is the mid-year advance filing (first half of the year only) and by Thai tax
+  // rules its personal allowance is half of the full-year ภงด.90 allowance — the two forms
+  // are genuinely different filings, not just a relabeled copy of the same numbers.
+  const isHalfYear = taxForm === '94';
+  const lastMonthIndex = isHalfYear ? Math.min(5, currentMonthIndex) : currentMonthIndex;
 
-  const monthly = [...HISTORICAL_MONTHLY, { m: THIS_MONTH_LONG, amt: currentMonthAmt, weightKg: currentMonthWeight, receiptCount: currentMonthReceiptCount }];
+  const monthly = useMemo(() => {
+    const months = Array.from({ length: 12 }, () => ({ amt: 0, weightKg: 0, receiptCount: 0 }));
+    for (const id of receiptOrder) {
+      const r = receipts[id];
+      if (r.status === 'void') continue;
+      const [y, m] = (r.date || '').split('-').map(Number);
+      if (y !== currentYear) continue;
+      months[m - 1].amt += parseMoney(r.total);
+      months[m - 1].weightKg += parseWeightKg(r.weight);
+      months[m - 1].receiptCount += 1;
+    }
+    return months
+      .slice(0, lastMonthIndex + 1)
+      .map((m, i) => ({ ...m, m: `${MONTH_LABELS_FULL[i]} ${TAX_YEAR_BE}` }));
+  }, [receiptOrder, receipts, currentYear, lastMonthIndex]);
 
   const totalIncome = useMemo(() => monthly.reduce((s, m) => s + m.amt, 0), [monthly]);
   const totalWeightKg = monthly.reduce((s, m) => s + m.weightKg, 0);
   const totalReceiptCount = monthly.reduce((s, m) => s + m.receiptCount, 0);
   const expenseDeduct = totalIncome * 0.6;
-  // ภงด.94 is the mid-year advance filing (first half of the year only) and by Thai tax
-  // rules its personal allowance is half of the full-year ภงด.90 allowance — the two forms
-  // are genuinely different filings, not just a relabeled copy of the same numbers.
-  const isHalfYear = taxForm === '94';
   const personalDeduct = isHalfYear ? 30000 : 60000;
   const periodLabel = isHalfYear ? `1 ม.ค. – 30 มิ.ย. ${TAX_YEAR_BE} (ครึ่งปีแรก)` : `1 ม.ค. – 31 ธ.ค. ${TAX_YEAR_BE} (เต็มปี)`;
   const netIncome = Math.max(totalIncome - expenseDeduct - personalDeduct, 0);

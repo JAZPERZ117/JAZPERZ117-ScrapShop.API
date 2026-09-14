@@ -32,12 +32,6 @@ const OTHER_REASONS = [
   { id: 'other', label: 'อื่นๆ (ระบุเอง)' },
 ];
 
-const FALLBACK_HISTORY = [
-  { no: 'PV670515-003', name: 'นายวิทยา', amount: '฿3,000.00' },
-  { no: 'PV670515-002', name: 'นายสมชาย', amount: '฿2,500.00' },
-  { no: 'PV670515-001', name: 'น.ส.กาญจนา', amount: '฿3,250.00' },
-];
-
 function money(n) {
   return '฿' + (Number(n) || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -112,6 +106,11 @@ export default function Payroll() {
   const [lastUpdated, setLastUpdated] = usePersistentState('scrapshop_payroll_last_updated', '10:42 น.');
   const [printSnapshot, setPrintSnapshot] = useState(null);
   const weekDates = useMemo(() => thisWeekDates(), []);
+
+  // The app has no resignation-tracking feature at all, so a "ลาออก" count could never be
+  // anything but a hardcoded, permanently-0 placeholder — replaced with a real distinct-role
+  // count of the current roster instead.
+  const roleCount = useMemo(() => new Set(order.map((id) => staff[id].role.split(' · ')[0])).size, [order, staff]);
 
   const s = staff[selectedId];
   const net = Math.max(dailyRate(s.base) * (parseFloat(s.days) || 0) - (parseFloat(s.advance) || 0) + (parseFloat(s.otherAmount) || 0), 0);
@@ -378,7 +377,7 @@ export default function Payroll() {
           <div>
             <div className="stat-label">ลูกน้องทั้งหมด</div>
             <div className="stat-value">{order.length} คน</div>
-            <div className="stat-foot">ทำงานอยู่ {order.length} · ลาออก 0</div>
+            <div className="stat-foot">{roleCount} ตำแหน่งงาน</div>
           </div>
         </div>
         <div className="stat-card">
@@ -681,12 +680,13 @@ export default function Payroll() {
               <IconReceipt />
               ประวัติจ่ายล่าสุด
             </div>
-            {(payHistory.length > 0 ? payHistory : FALLBACK_HISTORY).slice(0, 3).map((p, i) => (
+            {payHistory.length === 0 && <div className="empty-hint">ยังไม่มีประวัติการจ่าย</div>}
+            {payHistory.slice(0, 3).map((p, i) => (
               <div className="mini-stat-row" key={i}>
                 <span>
-                  {p.no} · {p.staffName || p.name}
+                  {p.no} · {p.staffName}
                 </span>
-                <span className="n">{p.net !== undefined ? money(p.net) : p.amount}</span>
+                <span className="n">{money(p.net)}</span>
               </div>
             ))}
           </div>

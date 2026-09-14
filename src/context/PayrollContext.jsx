@@ -36,12 +36,15 @@ export function attendanceFromDays(days) {
   return attendance;
 }
 
+// A real deployment keeps the staff roster as a starting point (renamed/edited later by the
+// shop), but starts each person with a fresh, unworked week — no attendance, advances, or
+// payments recorded yet.
 export const INITIAL_STAFF = {
-  wittaya: { name: 'นายวิทยา ทองสุข', role: 'พนักงานชั่งของ · เริ่มงาน 3 ปี 2 เดือน', init: 'วิ', bg: 'var(--blue-bg)', fg: 'var(--blue)', base: 12000, days: 6, maxDays: 6, attendance: ['full', 'full', 'full', 'full', 'full', 'full'], advance: 1000, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
-  somsak: { name: 'นายสมศักดิ์ แก้วมณี', role: 'คนขับรถรับซื้อ · เริ่มงาน 1 ปี 6 เดือน', init: 'สม', bg: 'var(--rose-bg)', fg: 'var(--rose)', base: 13500, days: 5, maxDays: 6, attendance: ['full', 'full', 'full', 'full', 'full', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
-  kanjana: { name: 'น.ส.กาญจนา ศรีสุข', role: 'แคชเชียร์ · เริ่มงาน 2 ปี', init: 'กา', bg: 'var(--plum-bg)', fg: 'var(--plum)', base: 10500, days: 6, maxDays: 6, attendance: ['full', 'full', 'full', 'full', 'full', 'full'], advance: 500, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
-  prasert: { name: 'นายประเสริฐ แสงทอง', role: 'พนักงานคัดแยก · เริ่มงาน 8 เดือน', init: 'ปร', bg: 'var(--amber-bg)', fg: 'var(--amber)', base: 9800, days: 4.5, maxDays: 6, attendance: ['full', 'full', 'full', 'full', 'half', 'off'], advance: 300, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: true },
-  malee: { name: 'นางมาลี วงศ์ไทย', role: 'พนักงานชั่งของ · เริ่มงาน 4 ปี', init: 'มา', bg: 'var(--green-100)', fg: 'var(--green-700)', base: 12000, days: 6, maxDays: 6, attendance: ['full', 'full', 'full', 'full', 'full', 'full'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: true },
+  wittaya: { name: 'นายวิทยา ทองสุข', role: 'พนักงานชั่งของ', init: 'วิ', bg: 'var(--blue-bg)', fg: 'var(--blue)', base: 12000, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
+  somsak: { name: 'นายสมศักดิ์ แก้วมณี', role: 'คนขับรถรับซื้อ', init: 'สม', bg: 'var(--rose-bg)', fg: 'var(--rose)', base: 13500, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
+  kanjana: { name: 'น.ส.กาญจนา ศรีสุข', role: 'แคชเชียร์', init: 'กา', bg: 'var(--plum-bg)', fg: 'var(--plum)', base: 10500, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
+  prasert: { name: 'นายประเสริฐ แสงทอง', role: 'พนักงานคัดแยก', init: 'ปร', bg: 'var(--amber-bg)', fg: 'var(--amber)', base: 9800, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
+  malee: { name: 'นางมาลี วงศ์ไทย', role: 'พนักงานชั่งของ', init: 'มา', bg: 'var(--green-100)', fg: 'var(--green-700)', base: 12000, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
 };
 
 export const INITIAL_ORDER = ['wittaya', 'somsak', 'kanjana', 'prasert', 'malee'];

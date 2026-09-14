@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { exportCsv } from '../lib/csvExport.js';
-import { useReceipts, INITIAL_ORDER } from '../context/ReceiptsContext.jsx';
+import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useCustomers } from '../context/CustomersContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
@@ -73,12 +73,6 @@ function parseItemLine(w) {
   return { weight: parseFloat(m[1].replace(/,/g, '')) || 0, price: parseFloat(m[2].replace(/,/g, '')) || 0 };
 }
 
-const FALLBACK_ACTIVITY = [
-  { text: 'พิมพ์ซ้ำ RC670515-010', time: '10:52 น.' },
-  { text: 'ยกเลิก RC670515-010', time: '10:50 น.' },
-  { text: 'ออกใบเสร็จ RC670515-012', time: '10:45 น.' },
-];
-
 export default function Receipts() {
   const navigate = useNavigate();
   const { receipts, setReceipts, order } = useReceipts();
@@ -109,8 +103,18 @@ export default function Receipts() {
   }, [filter, query, dateFilter, receipts, order]);
 
   const selected = receipts[selectedId] || receipts[order[0]];
-  const selectedStatus = selected.status;
-  const voidedIds = useMemo(() => order.filter((id) => receipts[id].status === 'void'), [order, receipts]);
+  const selectedStatus = selected?.status;
+  // The "ยกเลิกเดือนนี้" stat card below is explicitly scoped to this calendar month — without
+  // this filter it would silently show a lifetime total of every voided receipt ever, instead
+  // of resetting every month, same convention as monthActiveOrder just below.
+  const monthVoidedIds = useMemo(() => {
+    const now = new Date();
+    return order.filter((id) => {
+      if (receipts[id].status !== 'void') return false;
+      const [y, m] = (receipts[id].date || '').split('-').map(Number);
+      return y === now.getFullYear() && m === now.getMonth() + 1;
+    });
+  }, [order, receipts]);
 
   // "วันนี้"/"เดือนนี้" stat cards only count active receipts dated today — a voided receipt
   // or one from a previous day shouldn't still add to today's count/revenue, same convention
@@ -119,17 +123,25 @@ export default function Receipts() {
     () => order.filter((id) => receipts[id].status !== 'void' && receipts[id].date === todayISO()),
     [order, receipts]
   );
-  const newReceiptIds = useMemo(() => order.filter((id) => !INITIAL_ORDER.includes(id)), [order]);
-  const newActiveReceiptIds = useMemo(() => newReceiptIds.filter((id) => receipts[id].status !== 'void'), [newReceiptIds, receipts]);
   const todayCount = todayActiveOrder.length;
   const todayTotal = useMemo(() => todayActiveOrder.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0), [todayActiveOrder, receipts]);
-  const monthCount = 186 + newActiveReceiptIds.length;
-  const monthTotal = 512450 + newActiveReceiptIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
-  const reprintCount = 9 + activity.filter((a) => a.text.startsWith('พิมพ์ซ้ำ') || a.text.startsWith('ดาวน์โหลด')).length;
-  const reprintFromCount = 6 + printedIds.length;
+  // "เดือนนี้" needs a real calendar-month filter — receipts persist indefinitely, so without
+  // this it would silently become an all-time total once the shop's been running a while.
+  const monthActiveOrder = useMemo(() => {
+    const now = new Date();
+    return order.filter((id) => {
+      if (receipts[id].status === 'void') return false;
+      const [y, m] = (receipts[id].date || '').split('-').map(Number);
+      return y === now.getFullYear() && m === now.getMonth() + 1;
+    });
+  }, [order, receipts]);
+  const monthCount = monthActiveOrder.length;
+  const monthTotal = monthActiveOrder.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
+  const reprintCount = activity.filter((a) => a.text.startsWith('พิมพ์ซ้ำ') || a.text.startsWith('ดาวน์โหลด')).length;
+  const reprintFromCount = printedIds.length;
   const voidTotal = useMemo(
-    () => voidedIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
-    [voidedIds, receipts]
+    () => monthVoidedIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
+    [monthVoidedIds, receipts]
   );
 
   function logActivity(text) {
@@ -365,7 +377,7 @@ export default function Receipts() {
           </div>
           <div>
             <div className="stat-label">ยกเลิกเดือนนี้</div>
-            <div className="stat-value">{voidedIds.length} ใบ</div>
+            <div className="stat-value">{monthVoidedIds.length} ใบ</div>
             <div className="stat-foot">รวม {money(voidTotal)}</div>
           </div>
         </div>
@@ -496,6 +508,12 @@ export default function Receipts() {
 
         <div className="summary-sticky">
           <div className="receipt-shell">
+            {!selected ? (
+              <div className="empty-hint" style={{ padding: '40px 20px', textAlign: 'center' }}>
+                ยังไม่มีใบเสร็จให้แสดง — เริ่มรับซื้อของเก่าเพื่อออกใบเสร็จใบแรก
+              </div>
+            ) : (
+              <>
             <div className="receipt-shell-head">
               <div className="receipt-title-row">
                 <div className="card-title">
@@ -695,6 +713,8 @@ export default function Receipts() {
                 </button>
               </div>
             )}
+              </>
+            )}
           </div>
 
           <div className="card mini-stat-card">
@@ -702,7 +722,8 @@ export default function Receipts() {
               <IconClockHistory />
               กิจกรรมล่าสุด
             </div>
-            {(activity.length > 0 ? activity : FALLBACK_ACTIVITY).slice(0, 3).map((a, i) => (
+            {activity.length === 0 && <div className="empty-hint">ยังไม่มีกิจกรรม</div>}
+            {activity.slice(0, 3).map((a, i) => (
               <div className="mini-stat-row" key={i}>
                 <span>{a.text}</span>
                 <span className="n">{a.time}</span>

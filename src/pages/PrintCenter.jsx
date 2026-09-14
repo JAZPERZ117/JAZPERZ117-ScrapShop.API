@@ -15,7 +15,7 @@ import {
 } from '../icons.jsx';
 import { usePersistentState } from '../lib/persist.js';
 import { usePrinters } from '../context/PrintersContext.jsx';
-import { useReceipts, INITIAL_ORDER as RECEIPTS_INITIAL_ORDER } from '../context/ReceiptsContext.jsx';
+import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useCategories } from '../context/CategoriesContext.jsx';
@@ -25,28 +25,13 @@ import './PrintCenter.css';
 
 const PAY_METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', promptpay: 'พร้อมเพย์' };
 const STANDARD_MONTH_DAYS = 26;
-// Same baseline convention as the 512450 baht / 186 receipt figures used below (see
-// TaxReport.jsx/AnnualReport.jsx/MonthlyReport.jsx, which this mirrors) — without this,
-// "this month" weight came out as just the new receipts' raw weight with no baseline at all,
-// next to a baseline'd baht figure, implying an impossible baht/kg rate on the printed page.
-const CURRENT_MONTH_BASELINE_WEIGHT = 21955;
 
 const NOW = new Date();
 const TODAY_THAI_LONG = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'long', year: 'numeric' }).format(NOW);
-const TODAY_THAI_SHORT = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short', year: 'numeric' }).format(NOW);
 const THIS_MONTH_THAI_LONG = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'long', year: 'numeric' }).format(NOW);
 const THIS_MONTH_THAI_SHORT_TH = new Intl.DateTimeFormat('th-TH', { month: 'short' }).format(NOW);
 const THIS_YEAR_BE = NOW.getFullYear() + 543;
-
-// Jan-Apr are historical reference figures (this app has no real date-stamped receipt
-// history to compute them from) — same documented limitation as the Tax Report page,
-// whose numbers this mirrors so the two stay consistent.
-const HISTORICAL_MONTHLY = [
-  { m: `มกราคม ${THIS_YEAR_BE}`, amt: 402300, weightKg: 17240, receiptCount: 142 },
-  { m: `กุมภาพันธ์ ${THIS_YEAR_BE}`, amt: 384100, weightKg: 16510, receiptCount: 138 },
-  { m: `มีนาคม ${THIS_YEAR_BE}`, amt: 452800, weightKg: 19320, receiptCount: 151 },
-  { m: `เมษายน ${THIS_YEAR_BE}`, amt: 396950, weightKg: 17020, receiptCount: 125 },
-];
+const MONTH_LABELS_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 
 const TAX_BRACKETS = [
   { upTo: 150000, rate: 0 },
@@ -69,12 +54,6 @@ function calcProgressiveTax(netIncome) {
   }
   return tax;
 }
-
-const FALLBACK_LOG = [
-  { icon: 'receipt', title: 'ใบเสร็จ RC670515-012', sub: `โดยเจ้าของร้าน · วันนี้ 10:45 น. · เครื่องพิมพ์ใบเสร็จหน้าร้าน` },
-  { icon: 'daily', title: `สรุปยอดประจำวัน · ${TODAY_THAI_SHORT}`, sub: 'โดยเจ้าของร้าน · วันนี้ 08:00 น. · เครื่องพิมพ์สำนักงาน A4' },
-  { icon: 'payslip', title: 'สลิปเงินเดือน · นายประเสริฐ แสงทอง', sub: 'โดยเจ้าของร้าน · เมื่อวาน 16:20 น. · เครื่องพิมพ์สำนักงาน A4' },
-];
 
 function money(n) {
   return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -159,6 +138,24 @@ export default function PrintCenter() {
   const { categories, order: categoryOrder } = useCategories();
   const { customers, order: customerOrder } = useCustomers();
   const { settings } = useSettings();
+
+  // Every receipt now carries a real date, so each month's figures below are computed
+  // directly from actual data instead of a "historical demo months + real current month"
+  // baseline — a real shop's first year starts with every month at zero. Shared by both
+  // renderMonthlyDoc and renderTaxDoc so the two documents stay consistent.
+  function monthlyBreakdownForYear(year) {
+    const months = Array.from({ length: 12 }, () => ({ amt: 0, weightKg: 0, receiptCount: 0 }));
+    for (const id of receiptOrder) {
+      const r = receipts[id];
+      if (r.status === 'void') continue;
+      const [y, m] = (r.date || '').split('-').map(Number);
+      if (y !== year) continue;
+      months[m - 1].amt += parseMoney(r.total);
+      months[m - 1].weightKg += parseWeight(r.weight);
+      months[m - 1].receiptCount += 1;
+    }
+    return months;
+  }
 
   const [selectedReceiptId, setSelectedReceiptId] = useState(receiptOrder[0]);
   const [selectedPayIdx, setSelectedPayIdx] = useState(0);
@@ -610,14 +607,23 @@ export default function PrintCenter() {
   }
 
   function renderMonthlyDoc() {
-    const newReceiptIds = receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id));
     const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
-    const newActiveReceiptIds = newReceiptIds.filter((id) => receipts[id].status !== 'void');
-    const monthTotal = 512450 + newActiveReceiptIds.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
-    const monthCount = 186 + newActiveReceiptIds.length;
-    const monthWeight = CURRENT_MONTH_BASELINE_WEIGHT + newActiveReceiptIds.reduce((s, id) => s + parseWeight(receipts[id].weight), 0);
+    const thisMonth = monthlyBreakdownForYear(NOW.getFullYear())[NOW.getMonth()];
+    const monthTotal = thisMonth.amt;
+    const monthCount = thisMonth.receiptCount;
+    const monthWeight = thisMonth.weightKg;
     const totalDeductionKg = activeReceipts.reduce((s, id) => s + (receipts[id].deductionWeight || 0), 0);
-    const wagesPaid = payHistory.reduce((s, p) => s + (p.net || 0), 0);
+    // Real payroll payments only, scoped to this calendar month — payHistory persists
+    // indefinitely, so summing it unfiltered would silently pull in prior months' wages too
+    // once payroll has run more than once, overstating this figure and understating
+    // "กำไรสุทธิ" below. Mirrors MonthlyReport.jsx's identical scoping.
+    const now = new Date();
+    const wagesPaid = payHistory
+      .filter((p) => {
+        const d = new Date(p.paidAt);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+      })
+      .reduce((s, p) => s + (p.net || 0), 0);
     const netProfit = Math.max(monthTotal - wagesPaid, 0);
     return (
       <div className="a4-doc">
@@ -661,17 +667,15 @@ export default function PrintCenter() {
   }
 
   function renderTaxDoc() {
-    const newReceiptIds = receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id));
-    const newActiveReceiptIds = newReceiptIds.filter((id) => receipts[id].status !== 'void');
-    const currentMonthAmt = 512450 + newActiveReceiptIds.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
-    const currentMonthWeight = CURRENT_MONTH_BASELINE_WEIGHT + newActiveReceiptIds.reduce((s, id) => s + parseWeight(receipts[id].weight), 0);
-    const currentMonthReceiptCount = 186 + newActiveReceiptIds.length;
-    const monthly = [...HISTORICAL_MONTHLY, { m: THIS_MONTH_THAI_LONG, amt: currentMonthAmt, weightKg: currentMonthWeight, receiptCount: currentMonthReceiptCount }];
+    const isHalfYear = taxForm === '94';
+    const lastMonthIndex = isHalfYear ? Math.min(5, NOW.getMonth()) : NOW.getMonth();
+    const monthly = monthlyBreakdownForYear(NOW.getFullYear())
+      .slice(0, lastMonthIndex + 1)
+      .map((m, i) => ({ ...m, m: `${MONTH_LABELS_FULL[i]} ${THIS_YEAR_BE}` }));
     const totalIncome = monthly.reduce((s, m) => s + m.amt, 0);
     const totalWeightKg = monthly.reduce((s, m) => s + m.weightKg, 0);
     const totalReceiptCount = monthly.reduce((s, m) => s + m.receiptCount, 0);
     const expenseDeduct = totalIncome * 0.6;
-    const isHalfYear = taxForm === '94';
     const personalDeduct = isHalfYear ? 30000 : 60000;
     const periodLabel = isHalfYear ? `1 ม.ค. – 30 มิ.ย. ${THIS_YEAR_BE} (ครึ่งปีแรก)` : `1 ม.ค. – 31 ธ.ค. ${THIS_YEAR_BE} (เต็มปี)`;
     const netIncome = Math.max(totalIncome - expenseDeduct - personalDeduct, 0);
@@ -940,7 +944,8 @@ export default function PrintCenter() {
             ประวัติการพิมพ์ล่าสุด
           </div>
           <div>
-            {(printLog.length > 0 ? printLog : FALLBACK_LOG).slice(0, 6).map((log, i) => {
+            {printLog.length === 0 && <div className="empty-hint">ยังไม่เคยพิมพ์เอกสาร</div>}
+            {printLog.slice(0, 6).map((log, i) => {
               const LogIcon = DOCS[log.icon]?.Icon || IconPrint;
               return (
                 <div className="log-row" key={i}>

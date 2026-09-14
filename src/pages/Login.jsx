@@ -15,7 +15,7 @@ import {
 } from '../icons.jsx';
 import { storeAuth } from '../lib/auth.js';
 import { useCustomers } from '../context/CustomersContext.jsx';
-import { useReceipts, INITIAL_ORDER as RECEIPTS_INITIAL_ORDER } from '../context/ReceiptsContext.jsx';
+import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useUsers } from '../context/UsersContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
@@ -33,6 +33,12 @@ function parseMoney(s) {
 function parseWeight(w) {
   return parseFloat(String(w).replace(/[^\d.]/g, '')) || 0;
 }
+// Local, not UTC — matches ReceiptsContext.jsx's own todayISO(), which is what every
+// receipt's `date` field is actually stamped with.
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 function nowTimeStr() {
   return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
 }
@@ -45,12 +51,23 @@ export default function Login() {
   const { users, setUsers } = useUsers();
   const { settings } = useSettings();
 
-  const newReceiptIds = receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id));
-  const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
-  const newActiveReceiptIds = newReceiptIds.filter((id) => receipts[id].status !== 'void');
-  const monthTotal = 512450 + newActiveReceiptIds.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
-  const monthCount = 186 + newActiveReceiptIds.length;
-  const todayWeight = activeReceipts.reduce((s, id) => s + parseWeight(receipts[id].weight), 0);
+  // "เดือนนี้" needs a real calendar-month filter — receipts persist indefinitely, so without
+  // this it would silently become an all-time total once the shop's been running a while.
+  const monthActiveReceiptIds = (() => {
+    const now = new Date();
+    return receiptOrder.filter((id) => {
+      if (receipts[id].status === 'void') return false;
+      const [y, m] = (receipts[id].date || '').split('-').map(Number);
+      return y === now.getFullYear() && m === now.getMonth() + 1;
+    });
+  })();
+  const monthTotal = monthActiveReceiptIds.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
+  const monthCount = monthActiveReceiptIds.length;
+  // "วันนี้" needs the actual date filter, not just non-void — otherwise this chip only ever
+  // grows, accumulating every prior day's weight instead of resetting daily.
+  const todayWeight = receiptOrder
+    .filter((id) => receipts[id].status !== 'void' && receipts[id].date === todayISO())
+    .reduce((s, id) => s + parseWeight(receipts[id].weight), 0);
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
