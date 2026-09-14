@@ -1,5 +1,5 @@
-// Backs up server/shop.db to server/backups/shop-<timestamp>.db, then prunes backups older
-// than RETENTION_DAYS. Run manually with `node scripts/backup-db.js`, or scheduled (see
+// Backs up server/shop.db to BACKUP_DIR/shop-<timestamp>.db, then prunes backups older than
+// RETENTION_DAYS. Run manually with `node scripts/backup-db.js`, or scheduled (see
 // scripts/install-backup-task.ps1) to run automatically every day.
 //
 // Uses SQLite's own VACUUM INTO rather than a raw file copy: it takes a consistent snapshot
@@ -7,12 +7,17 @@
 // (server/src/index.js, usually under pm2) has the database open mid-write still gets a valid,
 // non-corrupt copy — a plain file copy could otherwise catch the file in a torn, partially
 // written state.
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 
 const DB_PATH = path.join(__dirname, '..', 'shop.db');
-const BACKUP_DIR = path.join(__dirname, '..', 'backups');
+// Defaults to a folder next to shop.db, but is meant to be pointed (via server/.env) at a
+// synced folder — OneDrive, Google Drive, etc. — so a backup actually leaves this machine
+// instead of sitting on the same disk as the database it's a backup of. Never a GitHub repo:
+// this app stores real customer PII (ID card numbers/photos), and this repo is public.
+const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, '..', 'backups');
 const RETENTION_DAYS = 30;
 
 if (!fs.existsSync(DB_PATH)) {
