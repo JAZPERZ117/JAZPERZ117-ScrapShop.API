@@ -8,11 +8,26 @@ import {
   IconCash,
   IconClockHistory,
   IconCheck,
+  IconBox,
+  IconScale,
+  IconX,
 } from '../icons.jsx';
-import { useReceipts, INITIAL_ORDER as RECEIPTS_INITIAL_ORDER } from '../context/ReceiptsContext.jsx';
+import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useCustomers, INITIAL_ORDER as CUSTOMERS_INITIAL_ORDER } from '../context/CustomersContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
+import { usePersistentState } from '../lib/persist.js';
 import './Dashboard.css';
+
+// Shown only until the shop's first real receipt exists (see `showOnboarding` below) — a
+// brand-new install has nothing purchased, no staff added, and no scale checked yet, so
+// pointing at exactly those three setup pages first is more useful here than a generic
+// "welcome" message.
+const ONBOARDING_STEPS = [
+  { to: '/products', label: 'ตรวจสอบราคาสินค้า', desc: 'ปรับราคารับซื้อแต่ละประเภทให้ตรงกับร้านจริง', Icon: IconBox, bg: 'var(--amber-bg)', fg: 'var(--amber)' },
+  { to: '/payroll', label: 'เพิ่มพนักงาน', desc: 'เพิ่มรายชื่อลูกน้องที่ทำงานในร้าน', Icon: IconUsers, bg: 'var(--plum-bg)', fg: 'var(--plum)' },
+  { to: '/scales', label: 'ตั้งค่าเครื่องชั่ง', desc: 'ตรวจสอบเครื่องชั่งที่ใช้จริงหน้าร้าน', Icon: IconScale, bg: 'var(--blue-bg)', fg: 'var(--blue)' },
+  { to: '/', label: 'เริ่มรับซื้อของเก่า', desc: 'เริ่มรายการรับซื้อและออกใบเสร็จใบแรก', Icon: IconCart, bg: 'var(--green-100)', fg: 'var(--green-700)' },
+];
 
 const todayThai = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', {
   day: 'numeric',
@@ -46,19 +61,29 @@ export default function Dashboard() {
   const { receipts, order: receiptOrder } = useReceipts();
   const { order: customerOrder } = useCustomers();
   const { products } = useProducts();
+  const [onboardingDismissed, setOnboardingDismissed] = usePersistentState('scrapshop_onboarding_dismissed', false);
+  // Once a real receipt exists the shop is clearly up and running, so there's no need to
+  // keep asking — this check alone (not the dismiss flag) is what makes the card disappear
+  // permanently the moment the owner actually starts using the app for real.
+  const showOnboarding = !onboardingDismissed && receiptOrder.length === 0;
 
-  // "This month" here follows the same convention used on the Receipts page: the seed
-  // receipts represent this month's baseline business, and anything added beyond that
-  // baseline is real growth on top of it — so these numbers move as real receipts come in.
-  const newReceiptIds = useMemo(() => receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id)), [receiptOrder]);
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
-  const newActiveReceiptIds = useMemo(() => newReceiptIds.filter((id) => receipts[id].status !== 'void'), [newReceiptIds, receipts]);
   // "วันนี้" cards need the actual date filter on top of "active" — active receipts alone are
   // every non-void receipt ever, which would make these stats only ever grow, never reset.
   const todayActiveReceipts = useMemo(() => activeReceipts.filter((id) => receipts[id].date === todayISO()), [activeReceipts, receipts]);
   const todayTotal = useMemo(() => todayActiveReceipts.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0), [todayActiveReceipts, receipts]);
-  const monthCount = 186 + newActiveReceiptIds.length;
-  const monthTotal = 512450 + newActiveReceiptIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
+  // "เดือนนี้" needs its own calendar-month filter too, not just "active" — receipts persist
+  // indefinitely, so without this, once the shop has been running more than a month this would
+  // silently become an all-time total instead of resetting every month.
+  const monthActiveReceipts = useMemo(() => {
+    const now = new Date();
+    return activeReceipts.filter((id) => {
+      const [y, m] = (receipts[id].date || '').split('-').map(Number);
+      return y === now.getFullYear() && m === now.getMonth() + 1;
+    });
+  }, [activeReceipts, receipts]);
+  const monthCount = monthActiveReceipts.length;
+  const monthTotal = monthActiveReceipts.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
   const cashOnHand = useMemo(
     () => todayActiveReceipts.filter((id) => receipts[id].method === 'เงินสด').reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
     [todayActiveReceipts, receipts]
@@ -83,7 +108,7 @@ export default function Dashboard() {
       });
   }, [activeReceipts, receipts, products]);
 
-  const latestNewReceipt = receipts[newReceiptIds[0]];
+  const latestNewReceipt = receipts[receiptOrder[0]];
   // Voided receipts can be voided out of creation order, so pick by voidedAt (when
   // present) rather than receiptOrder's creation-time ordering — otherwise voiding an
   // older receipt after a newer one is already void would keep showing the older event.
@@ -110,6 +135,32 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {showOnboarding && (
+        <div className="card card-pad section-gap" style={{ background: 'var(--green-50)', border: '1px solid var(--green-100)' }}>
+          <div className="card-head">
+            <div>
+              <div className="card-title">เริ่มต้นใช้งานร้านของคุณ</div>
+              <div className="card-sub">ตั้งค่าเบื้องต้นให้เรียบร้อยก่อนเริ่มรับซื้อของเก่าจริง — ข้ามได้ถ้าตั้งค่าไว้แล้ว</div>
+            </div>
+            <button type="button" className="btn btn-ghost" onClick={() => setOnboardingDismissed(true)}>
+              <IconX />
+              ซ่อน
+            </button>
+          </div>
+          <div className="quick-action-grid">
+            {ONBOARDING_STEPS.map((s) => (
+              <Link to={s.to} className="quick-action-card" key={s.to}>
+                <div className="quick-action-icon" style={{ background: s.bg, color: s.fg }}>
+                  <s.Icon />
+                </div>
+                <div className="quick-action-label">{s.label}</div>
+                <div className="quick-action-desc">{s.desc}</div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="stat-grid">
         <div className="stat-card">

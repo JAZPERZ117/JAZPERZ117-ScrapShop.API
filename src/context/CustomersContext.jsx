@@ -18,20 +18,10 @@ function money(n) {
   return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export const INITIAL_CUSTOMERS = {
-  somchai: { name: 'คุณสมชาย ใจดี', init: 'สม', bg: 'var(--amber-bg)', fg: 'var(--amber)', phone: '089-421-7765', idNumber: '3-1099-xxxxx-45-1', idExpiry: '2028-03-01', addr: 'ต.เกาะเต่า อ.เกาะพะงัน จ.สุราษฎร์ธานี', tag: 'regular', weight: '642.10 กก.', total: '฿18,240.00', visits: '14 ครั้ง', since: 'มี.ค. 2565', lastVisit: 'วันนี้ 10:45 น.',
-    hist: [{ no: 'RC670515-012', dt: 'วันนี้ · 10:45 น.', amt: '฿890.00' }, { no: 'RC670502-004', dt: '2 พ.ค. 2567', amt: '฿1,240.00' }, { no: 'RC670418-019', dt: '18 เม.ย. 2567', amt: '฿670.00' }] },
-  charoen: { name: 'ร้านเจริญทรัพย์', init: 'รเ', bg: 'var(--blue-bg)', fg: 'var(--blue)', phone: '081-993-2214', idNumber: '3-1099-xxxxx-12-7', idExpiry: '2027-11-01', addr: 'ต.เกาะเต่า อ.เกาะพะงัน จ.สุราษฎร์ธานี', tag: 'regular', weight: '2,140.60 กก.', total: '฿64,120.00', visits: '31 ครั้ง', since: 'ม.ค. 2564', lastVisit: 'วันนี้ 10:20 น.',
-    hist: [{ no: 'RC670515-011', dt: 'วันนี้ · 10:20 น.', amt: '฿2,450.00' }, { no: 'RC670428-007', dt: '28 เม.ย. 2567', amt: '฿3,120.00' }, { no: 'RC670402-015', dt: '2 เม.ย. 2567', amt: '฿1,980.00' }] },
-  wilok: { name: 'คุณวิโลกษณ์ มากมี', init: 'วิ', bg: 'var(--plum-bg)', fg: 'var(--plum)', phone: '062-118-4470', idNumber: '3-1099-xxxxx-88-3', idExpiry: '2026-09-20', addr: 'ต.บ้านใต้ อ.เกาะพะงัน จ.สุราษฎร์ธานี', tag: 'general', weight: '96.40 กก.', total: '฿4,890.00', visits: '3 ครั้ง', since: 'ก.พ. 2567', lastVisit: 'วันนี้ 10:05 น.',
-    hist: [{ no: 'RC670515-010', dt: 'วันนี้ · 10:05 น.', amt: '฿1,670.00' }, { no: 'RC670310-002', dt: '10 มี.ค. 2567', amt: '฿1,820.00' }, { no: 'RC670220-006', dt: '20 ก.พ. 2567', amt: '฿1,400.00' }] },
-  prasert: { name: 'คุณประเสริฐ แสงทอง', init: 'ปร', bg: 'var(--rose-bg)', fg: 'var(--rose)', phone: '095-772-6631', idNumber: '3-1099-xxxxx-21-9', idExpiry: '2027-06-15', addr: 'ต.เกาะเต่า อ.เกาะพะงัน จ.สุราษฎร์ธานี', tag: 'general', weight: '210.30 กก.', total: '฿5,640.00', visits: '6 ครั้ง', since: 'พ.ย. 2566', lastVisit: 'วันนี้ 09:30 น.',
-    hist: [{ no: 'RC670515-009', dt: 'วันนี้ · 09:30 น.', amt: '฿750.00' }, { no: 'RC670419-003', dt: '19 เม.ย. 2567', amt: '฿980.00' }, { no: 'RC670305-011', dt: '5 มี.ค. 2567', amt: '฿1,150.00' }] },
-  teera: { name: 'คุณธีระ บุญมา', init: 'ธี', bg: 'var(--amber-bg)', fg: 'var(--amber)', phone: '064-887-5512', idNumber: '3-1099-xxxxx-97-6', idExpiry: '2027-09-01', addr: 'ต.บ้านใต้ อ.เกาะพะงัน จ.สุราษฎร์ธานี', tag: 'general', weight: '312.70 กก.', total: '฿6,980.00', visits: '9 ครั้ง', since: 'ก.ย. 2566', lastVisit: 'เมื่อวาน 15:40 น.',
-    hist: [{ no: 'RC670514-007', dt: 'เมื่อวาน · 15:40 น.', amt: '฿540.00' }, { no: 'RC670422-012', dt: '22 เม.ย. 2567', amt: '฿1,100.00' }, { no: 'RC670330-005', dt: '30 มี.ค. 2567', amt: '฿890.00' }] },
-};
+// Real deployment: no customers exist yet until the shop actually adds one.
+export const INITIAL_CUSTOMERS = {};
 
-export const INITIAL_ORDER = ['somchai', 'charoen', 'wilok', 'prasert', 'teera'];
+export const INITIAL_ORDER = [];
 
 export const BLANK_CUSTOMER = {
   name: '', init: '', bg: 'var(--green-100)', fg: 'var(--green-700)', phone: '', idNumber: '', idExpiry: '', idPhoto: '', addr: 'ยังไม่ได้บันทึกที่อยู่', tag: 'general', weight: '0.00 กก.', total: '฿0.00', visits: '0 ครั้ง', since: 'พ.ค. 2567', lastVisit: 'ยังไม่เคยซื้อขาย', hist: [],

@@ -25,8 +25,7 @@ if (existing) {
 const DEMO_STAFF = [
   { username: 'kanjana_pos', displayName: 'น.ส.กาญจนา ศรีสุข', role: 'แคชเชียร์', pin: '1234', active: 1 },
   { username: 'wittaya_scale', displayName: 'นายวิทยา ทองสุข', role: 'พนักงานชั่งของ', pin: '5678', active: 1 },
-  // Deliberately seeded inactive — a worked demo example of a disabled account in the Users page.
-  { username: 'prasert_sort', displayName: 'นายประเสริฐ แสงทอง', role: 'พนักงานชั่งของ', pin: '9012', active: 0 },
+  { username: 'prasert_sort', displayName: 'นายประเสริฐ แสงทอง', role: 'พนักงานชั่งของ', pin: '9012', active: 1 },
 ];
 for (const staff of DEMO_STAFF) {
   const already = db.prepare('SELECT id FROM users WHERE username = ?').get(staff.username);

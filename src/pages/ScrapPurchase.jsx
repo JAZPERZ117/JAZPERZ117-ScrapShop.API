@@ -700,7 +700,12 @@ export default function ScrapPurchase() {
                   </div>
                 </div>
               </div>
-              <button type="button" className="btn-scale" onClick={pullWeight}>
+              <button
+                type="button"
+                className="btn-scale"
+                onClick={pullWeight}
+                title="เว็บเบราว์เซอร์เชื่อมต่อกับเครื่องชั่งจริงโดยตรงไม่ได้ ปุ่มนี้จึงจำลองค่าน้ำหนักให้แทน — กรอกน้ำหนักที่ชั่งได้จริงด้วยตัวเองในช่องด้านบนแทนได้เสมอ"
+              >
                 <IconRefresh />
                 ดึงน้ำหนักเข้ารายการ (จำลอง)
               </button>

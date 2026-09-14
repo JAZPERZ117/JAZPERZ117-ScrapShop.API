@@ -15,7 +15,7 @@ import {
 } from '../icons.jsx';
 import { storeAuth } from '../lib/auth.js';
 import { useCustomers } from '../context/CustomersContext.jsx';
-import { useReceipts, INITIAL_ORDER as RECEIPTS_INITIAL_ORDER } from '../context/ReceiptsContext.jsx';
+import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useUsers } from '../context/UsersContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
@@ -51,10 +51,18 @@ export default function Login() {
   const { users, setUsers } = useUsers();
   const { settings } = useSettings();
 
-  const newReceiptIds = receiptOrder.filter((id) => !RECEIPTS_INITIAL_ORDER.includes(id));
-  const newActiveReceiptIds = newReceiptIds.filter((id) => receipts[id].status !== 'void');
-  const monthTotal = 512450 + newActiveReceiptIds.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
-  const monthCount = 186 + newActiveReceiptIds.length;
+  // "เดือนนี้" needs a real calendar-month filter — receipts persist indefinitely, so without
+  // this it would silently become an all-time total once the shop's been running a while.
+  const monthActiveReceiptIds = (() => {
+    const now = new Date();
+    return receiptOrder.filter((id) => {
+      if (receipts[id].status === 'void') return false;
+      const [y, m] = (receipts[id].date || '').split('-').map(Number);
+      return y === now.getFullYear() && m === now.getMonth() + 1;
+    });
+  })();
+  const monthTotal = monthActiveReceiptIds.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
+  const monthCount = monthActiveReceiptIds.length;
   // "วันนี้" needs the actual date filter, not just non-void — otherwise this chip only ever
   // grows, accumulating every prior day's weight instead of resetting daily.
   const todayWeight = receiptOrder
