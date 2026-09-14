@@ -1,4 +1,7 @@
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const https = require('https');
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -35,6 +38,16 @@ app.use(
   })
 );
 app.use(express.json());
+
+// Serves the built frontend (npm run build) from the same origin/port as the API — this is
+// what lets a real LAN deployment run a single HTTPS server instead of a separate dev-only
+// Vite server. In local development dist/ doesn't exist yet, so this is silently a no-op and
+// npm run dev's own Vite server (with its /api proxy) keeps working exactly as before.
+const distPath = path.join(__dirname, '../../dist');
+const hasBuiltFrontend = fs.existsSync(distPath);
+if (hasBuiltFrontend) {
+  app.use(express.static(distPath));
+}
 
 // Every endpoint below that accepts a password or PIN guess needs this brute-force limiter —
 // generous enough for a real typo, tight enough to make guessing impractical.
@@ -216,6 +229,18 @@ app.post('/api/pin-login', authLimiter, (req, res) => {
   });
 });
 
+// React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
+// has to still get index.html from the server (there's no real /receipts file on disk) and let
+// the client-side router take over from there. Registered after every real route above, so it
+// only catches what nothing else already matched — a request under /api that reached this point
+// is a genuinely unknown endpoint, not a page route, so it correctly falls through as a 404
+// instead of being served the frontend's index.html.
+if (hasBuiltFrontend) {
+  app.get(/^(?!\/api\/).*/, (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
 // Catches the CORS rejection above (and any other thrown error) so a blocked cross-origin
 // request gets a plain 403 instead of Express's default error page, which would otherwise
 // leak the server's file paths and stack trace to whoever sent the request.
@@ -224,6 +249,21 @@ app.use((err, req, res, next) => {
   res.status(403).json({ error: 'Forbidden' });
 });
 
-app.listen(PORT, () => {
-  console.log(`API server listening on http://localhost:${PORT}`);
-});
+// A cert/key on disk (see README for how to generate one for the shop's LAN) switches this to
+// HTTPS automatically; without one it falls back to plain HTTP, which is what local development
+// (npm run dev, no cert generated) has always done and keeps doing unchanged.
+const CERT_PATH = process.env.HTTPS_CERT || path.join(__dirname, '../certs/cert.pem');
+const KEY_PATH = process.env.HTTPS_KEY || path.join(__dirname, '../certs/key.pem');
+const hasCert = fs.existsSync(CERT_PATH) && fs.existsSync(KEY_PATH);
+
+if (hasCert) {
+  https
+    .createServer({ cert: fs.readFileSync(CERT_PATH), key: fs.readFileSync(KEY_PATH) }, app)
+    .listen(PORT, () => {
+      console.log(`API+web server listening on https://localhost:${PORT}`);
+    });
+} else {
+  app.listen(PORT, () => {
+    console.log(`API server listening on http://localhost:${PORT}`);
+  });
+}
