@@ -662,6 +662,94 @@ app.put('/api/receipts/:no', requireAuth, (req, res) => {
   res.json({ receipt: toApiReceipt(db.prepare('SELECT * FROM receipts WHERE no = ?').get(row.no)) });
 });
 
+function toApiDelivery(row) {
+  return {
+    no: row.no,
+    date: row.date,
+    time: row.time,
+    status: row.status,
+    buyerName: row.buyer_name,
+    buyerAddress: row.buyer_address,
+    buyerContact: row.buyer_contact,
+    vehicle: row.vehicle,
+    driver: row.driver,
+    note: row.note,
+    items: JSON.parse(row.items || '[]'),
+    totalWeight: row.total_weight,
+    totalAmount: row.total_amount,
+  };
+}
+
+// Deliveries (outbound shipments to buyers) used to live only in each browser's own
+// localStorage — a delivery dispatched from one device needs to show up (and its stock
+// commitment be accounted for) on every other device immediately.
+app.get('/api/deliveries', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM deliveries ORDER BY created_at DESC, rowid DESC').all();
+  res.json({ deliveries: rows.map(toApiDelivery) });
+});
+
+app.post('/api/deliveries', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.no) return res.status(400).json({ error: 'ไม่มีเลขที่ใบส่งของ' });
+  if (db.prepare('SELECT no FROM deliveries WHERE no = ?').get(b.no)) {
+    return res.status(409).json({ error: `เลขที่ใบส่งของ ${b.no} ถูกใช้แล้ว` });
+  }
+  db.prepare(
+    `INSERT INTO deliveries (no, date, time, status, buyer_name, buyer_address, buyer_contact, vehicle, driver, note, items, total_weight, total_amount)
+     VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    b.no,
+    b.date || todayISO(),
+    b.time || '',
+    b.buyerName || '',
+    b.buyerAddress || '',
+    b.buyerContact || '',
+    b.vehicle || '',
+    b.driver || '',
+    b.note || '',
+    JSON.stringify(b.items || []),
+    b.totalWeight || 0,
+    b.totalAmount || 0
+  );
+  const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(b.no);
+  res.status(201).json({ delivery: toApiDelivery(row) });
+});
+
+app.put('/api/deliveries/:no/deliver', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
+  if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
+  db.prepare('UPDATE deliveries SET status = ? WHERE no = ?').run('delivered', row.no);
+  res.json({ delivery: toApiDelivery(db.prepare('SELECT * FROM deliveries WHERE no = ?').get(row.no)) });
+});
+
+app.put('/api/deliveries/:no', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
+  if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
+  const b = req.body || {};
+  db.prepare(
+    `UPDATE deliveries SET buyer_name = ?, buyer_address = ?, buyer_contact = ?, vehicle = ?, driver = ?, note = ?, items = ?, total_weight = ?, total_amount = ? WHERE no = ?`
+  ).run(
+    b.buyerName !== undefined ? b.buyerName : row.buyer_name,
+    b.buyerAddress !== undefined ? b.buyerAddress : row.buyer_address,
+    b.buyerContact !== undefined ? b.buyerContact : row.buyer_contact,
+    b.vehicle !== undefined ? b.vehicle : row.vehicle,
+    b.driver !== undefined ? b.driver : row.driver,
+    b.note !== undefined ? b.note : row.note,
+    b.items !== undefined ? JSON.stringify(b.items) : row.items,
+    b.totalWeight !== undefined ? b.totalWeight : row.total_weight,
+    b.totalAmount !== undefined ? b.totalAmount : row.total_amount,
+    row.no
+  );
+  res.json({ delivery: toApiDelivery(db.prepare('SELECT * FROM deliveries WHERE no = ?').get(row.no)) });
+});
+
+app.delete('/api/deliveries/:no', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
+  if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
+  db.prepare('DELETE FROM deliveries WHERE no = ?').run(row.no);
+  res.json({ ok: true });
+});
+
 // React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
 // has to still get index.html from the server (there's no real /receipts file on disk) and let
 // the client-side router take over from there. Registered after every real route above, so it

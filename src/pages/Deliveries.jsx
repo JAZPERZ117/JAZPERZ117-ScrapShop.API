@@ -66,7 +66,7 @@ function bahtText(amount) {
 }
 
 export default function Deliveries() {
-  const { deliveries, setDeliveries, order, setOrder, addDelivery, markDelivered } = useDeliveries();
+  const { deliveries, order, addDelivery, updateDelivery, deleteDelivery, markDelivered } = useDeliveries();
   const { products, order: productOrder, addStock, addStockById, removeStock } = useProducts();
   const { settings } = useSettings();
 
@@ -167,19 +167,24 @@ export default function Deliveries() {
       price: parseFloat(r.price) || 0,
       amount: rowAmount(r),
     }));
-    addDelivery({
-      no,
-      time: timeStr,
-      buyerName: buyerName.trim(),
-      buyerAddress: buyerAddress.trim(),
-      buyerContact: buyerContact.trim(),
-      vehicle: vehicle.trim(),
-      driver: driver.trim(),
-      note: note.trim(),
-      items,
-      totalWeight,
-      totalAmount,
-    });
+    try {
+      await addDelivery({
+        no,
+        time: timeStr,
+        buyerName: buyerName.trim(),
+        buyerAddress: buyerAddress.trim(),
+        buyerContact: buyerContact.trim(),
+        vehicle: vehicle.trim(),
+        driver: driver.trim(),
+        note: note.trim(),
+        items,
+        totalWeight,
+        totalAmount,
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     // Goods physically leave the shop once the delivery is dispatched, so stock drops now —
     // "ยืนยันส่งถึงแล้ว" afterwards only confirms arrival, it doesn't move any more stock.
     await Promise.all(validRows.map((r) => removeStock(r.productId, rowWeight(r))));
@@ -291,14 +296,6 @@ export default function Deliveries() {
     // brand-new placeholder product instead of updating the real one. Older deliveries saved
     // before productId was tracked have no id to fall back on, so they still use the
     // name-based restore (unchanged, pre-existing behavior for that legacy data only).
-    let unrestoredWeight = 0;
-    for (const it of editForm.originalItems) {
-      if (it.productId) {
-        if (!(await addStockById(it.productId, it.weight))) unrestoredWeight += it.weight;
-      } else {
-        await addStock(it.name, it.weight);
-      }
-    }
     const items = validRows.map((r) => ({
       productId: r.productId,
       name: products[r.productId].name,
@@ -306,11 +303,8 @@ export default function Deliveries() {
       price: parseFloat(r.price) || 0,
       amount: editRowAmount(r),
     }));
-    await Promise.all(validRows.map((r) => removeStock(r.productId, editRowWeight(r))));
-    setDeliveries((prev) => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
+    try {
+      await updateDelivery(id, {
         buyerName: editForm.buyerName.trim(),
         buyerAddress: editForm.buyerAddress.trim(),
         buyerContact: editForm.buyerContact.trim(),
@@ -320,8 +314,20 @@ export default function Deliveries() {
         items,
         totalWeight: editTotalWeight,
         totalAmount: editTotalAmount,
-      },
-    }));
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    let unrestoredWeight = 0;
+    for (const it of editForm.originalItems) {
+      if (it.productId) {
+        if (!(await addStockById(it.productId, it.weight))) unrestoredWeight += it.weight;
+      } else {
+        await addStock(it.name, it.weight);
+      }
+    }
+    await Promise.all(validRows.map((r) => removeStock(r.productId, editRowWeight(r))));
     setBanner(
       unrestoredWeight > 0
         ? { type: 'error', text: `บันทึกการแก้ไขใบส่งของ ${original.no} แล้ว — แต่คืนสต็อกเดิม ${unrestoredWeight.toFixed(2)} กก. ไม่ได้ เพราะสินค้านั้นถูกลบไปแล้ว กรุณาตรวจสอบสต็อกด้วยตนเอง` }
@@ -346,13 +352,12 @@ export default function Deliveries() {
         await addStock(it.name, it.weight);
       }
     }
-    const remaining = order.filter((oid) => oid !== id);
-    setOrder(remaining);
-    setDeliveries((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    try {
+      await deleteDelivery(id);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     if (id === selectedId) setSelectedId(null);
     if (isEditing && editForm?.id === id) {
       setIsEditing(false);

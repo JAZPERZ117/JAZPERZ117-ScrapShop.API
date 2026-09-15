@@ -117,4 +117,27 @@ db.exec(`
   );
 `);
 
+// Deliveries (outbound shipments to buyers, with the stock they carry out) used to live only
+// in each browser's own localStorage. `no` (the delivery number, e.g. "DO123456789") is the
+// real primary key here, same as it already was as the object key in the old client-side
+// `deliveries` map — no separate id.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS deliveries (
+    no TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    time TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    buyer_name TEXT NOT NULL DEFAULT '',
+    buyer_address TEXT NOT NULL DEFAULT '',
+    buyer_contact TEXT NOT NULL DEFAULT '',
+    vehicle TEXT NOT NULL DEFAULT '',
+    driver TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    items TEXT NOT NULL DEFAULT '[]',
+    total_weight REAL NOT NULL DEFAULT 0,
+    total_amount REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;
