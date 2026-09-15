@@ -23,6 +23,26 @@ function nowTimeStr() {
   return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
 }
 
+// lastLogin is stored as a real ISO timestamp (see Login.jsx) so "logged in today" stays
+// accurate day to day, instead of a baked "วันนี้ ..." string that would say "today" forever.
+function isLoggedInToday(lastLogin) {
+  if (!lastLogin) return false;
+  const d = new Date(lastLogin);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+}
+
+function formatLastLogin(lastLogin) {
+  if (!lastLogin) return 'ยังไม่เคยเข้าสู่ระบบ';
+  const d = new Date(lastLogin);
+  if (Number.isNaN(d.getTime())) return lastLogin; // legacy literal string (e.g. "ยังไม่เคยเข้าสู่ระบบ")
+  const timeStr = d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+  if (isLoggedInToday(lastLogin)) return `วันนี้ ${timeStr}`;
+  const dateStr = d.toLocaleDateString('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short', year: 'numeric' });
+  return `${dateStr} ${timeStr}`;
+}
+
 export default function Users() {
   const { users, setUsers, order, setOrder, refreshUsers } = useUsers();
   const [selectedId, setSelectedId] = useState(order[0]);
@@ -45,7 +65,7 @@ export default function Users() {
   const [pwSaving, setPwSaving] = useState(false);
 
   const u = users[selectedId];
-  const loggedInToday = order.filter((id) => (users[id].lastLogin || '').startsWith('วันนี้'));
+  const loggedInToday = order.filter((id) => isLoggedInToday(users[id].lastLogin));
 
   // The selected user can vanish out from under this page — refreshUsers() (see
   // UsersContext.jsx) prunes any local entry the server no longer has, e.g. because it was
@@ -356,7 +376,7 @@ export default function Users() {
                     <td>
                       <span className="badge badge-blue">{item.role}</span>
                     </td>
-                    <td style={{ fontSize: 12, color: 'var(--ink-500)' }}>{item.lastLogin}</td>
+                    <td style={{ fontSize: 12, color: 'var(--ink-500)' }}>{formatLastLogin(item.lastLogin)}</td>
                     <td>
                       {item.active ? (
                         <span className="badge badge-green">

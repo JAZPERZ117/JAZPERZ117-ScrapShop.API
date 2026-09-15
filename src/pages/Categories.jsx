@@ -37,17 +37,19 @@ export default function Categories() {
   // instead of hardcoded figures, so they stay correct after any add/edit/delete.
   const productIds = Object.keys(products);
   const revenueByCategory = useMemo(() => {
-    const byName = {};
-    for (const id of Object.values(receipts)) {
-      if (id.status === 'void') continue;
-      for (const it of id.items || []) {
-        byName[it.n] = (byName[it.n] || 0) + parseMoney(it.t);
-      }
-    }
     const out = {};
-    for (const pid of productIds) {
-      const p = products[pid];
-      out[p.cat] = (out[p.cat] || 0) + (byName[p.name] || 0);
+    for (const r of Object.values(receipts)) {
+      if (r.status === 'void') continue;
+      for (const it of r.items || []) {
+        // Prefer the category snapshotted at purchase time (see ScrapPurchase.jsx) so a
+        // product's historical revenue stays attributed to its category even after the
+        // product itself is later deleted. Receipts from before that snapshot existed fall
+        // back to a live name lookup, same as before — only pre-existing receipts can still
+        // lose their category attribution if the referenced product no longer exists.
+        const cat = it.cat || Object.values(products).find((p) => p.name === it.n)?.cat;
+        if (!cat) continue;
+        out[cat] = (out[cat] || 0) + parseMoney(it.t);
+      }
     }
     return out;
   }, [receipts, products]);

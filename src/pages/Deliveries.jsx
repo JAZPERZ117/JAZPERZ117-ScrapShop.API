@@ -67,7 +67,7 @@ function bahtText(amount) {
 
 export default function Deliveries() {
   const { deliveries, setDeliveries, order, setOrder, addDelivery, markDelivered } = useDeliveries();
-  const { products, order: productOrder, addStock, removeStock } = useProducts();
+  const { products, order: productOrder, addStock, addStockById, removeStock } = useProducts();
   const { settings } = useSettings();
 
   const [showForm, setShowForm] = useState(false);
@@ -157,6 +157,11 @@ export default function Deliveries() {
     const no = makeDeliveryNo();
     const timeStr = nowTimeStr();
     const items = validRows.map((r) => ({
+      // Keep the id alongside the display name — stock restore on delete/edit needs to
+      // operate by id (see addStockById) so it can't be fooled by a later product rename,
+      // and can fail safely instead of fabricating a placeholder product if the product is
+      // deleted after this delivery is created.
+      productId: r.productId,
       name: products[r.productId].name,
       weight: rowWeight(r),
       price: parseFloat(r.price) || 0,
@@ -206,7 +211,8 @@ export default function Deliveries() {
       originalItems: d.items,
       items: d.items.map((it) => ({
         rowId: nextRowId++,
-        productId: productOrder.find((pid) => products[pid].name === it.name) || '',
+        // Older deliveries (saved before productId was tracked) fall back to a name lookup.
+        productId: (it.productId && products[it.productId] ? it.productId : null) || productOrder.find((pid) => products[pid].name === it.name) || '',
         weight: String(it.weight),
         price: String(it.price),
       })),
@@ -244,7 +250,9 @@ export default function Deliveries() {
     if (!row.productId || !editForm) return 0;
     const live = parseStockKg(products[row.productId]?.stock);
     const productName = products[row.productId]?.name;
-    const reserved = editForm.originalItems.filter((it) => it.name === productName).reduce((s, it) => s + it.weight, 0);
+    const reserved = editForm.originalItems
+      .filter((it) => (it.productId ? it.productId === row.productId : it.name === productName))
+      .reduce((s, it) => s + it.weight, 0);
     const idx = editForm.items.indexOf(row);
     const claimedBySiblings = editForm.items.slice(0, idx).reduce((sum, it) => (it.productId === row.productId ? sum + editRowWeight(it) : sum), 0);
     return Math.max(live + reserved - claimedBySiblings, 0);
@@ -264,6 +272,13 @@ export default function Deliveries() {
       setBanner({ type: 'error', text: 'กรุณากรอกชื่อผู้รับซื้อปลายทาง' });
       return;
     }
+    // A row with no resolvable productId means the product it referenced was deleted and no
+    // product with the same name exists either — warn instead of silently dropping the line
+    // item and its weight from the saved delivery.
+    const orphanedCount = editForm.items.filter((r) => !r.productId).length;
+    if (orphanedCount > 0 && !window.confirm(`${orphanedCount} รายการอ้างอิงสินค้าที่ถูกลบไปแล้วและจะถูกตัดออกจากใบส่งของนี้ ต้องการดำเนินการต่อหรือไม่?`)) {
+      return;
+    }
     const validRows = editForm.items.filter((r) => r.productId && editRowWeight(r) > 0);
     if (validRows.length === 0) {
       setBanner({ type: 'error', text: 'กรุณาระบุรายการสินค้าอย่างน้อย 1 รายการพร้อมน้ำหนัก' });
@@ -272,11 +287,22 @@ export default function Deliveries() {
     const id = editForm.id;
     const original = deliveries[id];
     // Give back the delivery's old stock commitment, then take the edited amounts — correct
-    // regardless of what changed (weights, products added/removed, or both at once).
+    // regardless of what changed (weights, products added/removed, or both at once). Restore
+    // by id when available (addStockById) rather than by name — a name-based restore on a
+    // product that's since been renamed wouldn't find it, and worse, would fabricate a
+    // brand-new placeholder product instead of updating the real one. Older deliveries saved
+    // before productId was tracked have no id to fall back on, so they still use the
+    // name-based restore (unchanged, pre-existing behavior for that legacy data only).
+    let unrestoredWeight = 0;
     for (const it of editForm.originalItems) {
-      addStock(it.name, it.weight);
+      if (it.productId) {
+        if (!addStockById(it.productId, it.weight)) unrestoredWeight += it.weight;
+      } else {
+        addStock(it.name, it.weight);
+      }
     }
     const items = validRows.map((r) => ({
+      productId: r.productId,
       name: products[r.productId].name,
       weight: editRowWeight(r),
       price: parseFloat(r.price) || 0,
@@ -300,7 +326,11 @@ export default function Deliveries() {
         totalAmount: editTotalAmount,
       },
     }));
-    setBanner({ type: 'success', text: `บันทึกการแก้ไขใบส่งของ ${original.no} แล้ว` });
+    setBanner(
+      unrestoredWeight > 0
+        ? { type: 'error', text: `บันทึกการแก้ไขใบส่งของ ${original.no} แล้ว — แต่คืนสต็อกเดิม ${unrestoredWeight.toFixed(2)} กก. ไม่ได้ เพราะสินค้านั้นถูกลบไปแล้ว กรุณาตรวจสอบสต็อกด้วยตนเอง` }
+        : { type: 'success', text: `บันทึกการแก้ไขใบส่งของ ${original.no} แล้ว` }
+    );
     setIsEditing(false);
     setEditForm(null);
   }
@@ -309,9 +339,16 @@ export default function Deliveries() {
     const d = deliveries[id];
     if (!d) return;
     if (!window.confirm(`ยืนยันลบใบส่งของ "${d.no}"? ระบบจะคืนน้ำหนักสินค้ากลับเข้าสต็อกให้อัตโนมัติ`)) return;
-    // The goods never actually left, so give the weight back to each product's stock.
+    // The goods never actually left, so give the weight back to each product's stock. Restore
+    // by id when available — see saveEditDelivery for why a name-based fallback only applies
+    // to legacy deliveries that never had a productId to begin with.
+    let unrestoredWeight = 0;
     for (const it of d.items) {
-      addStock(it.name, it.weight);
+      if (it.productId) {
+        if (!addStockById(it.productId, it.weight)) unrestoredWeight += it.weight;
+      } else {
+        addStock(it.name, it.weight);
+      }
     }
     const remaining = order.filter((oid) => oid !== id);
     setOrder(remaining);
@@ -325,7 +362,11 @@ export default function Deliveries() {
       setIsEditing(false);
       setEditForm(null);
     }
-    setBanner({ type: 'error', text: `ลบใบส่งของ "${d.no}" แล้ว — คืนน้ำหนักสินค้ากลับเข้าสต็อกแล้ว` });
+    setBanner(
+      unrestoredWeight > 0
+        ? { type: 'error', text: `ลบใบส่งของ "${d.no}" แล้ว — แต่คืนสต็อก ${unrestoredWeight.toFixed(2)} กก. ไม่ได้ เพราะสินค้านั้นถูกลบไปแล้ว กรุณาตรวจสอบสต็อกด้วยตนเอง` }
+        : { type: 'error', text: `ลบใบส่งของ "${d.no}" แล้ว — คืนน้ำหนักสินค้ากลับเข้าสต็อกแล้ว` }
+    );
   }
 
   const rowsFiltered = useMemo(() => {

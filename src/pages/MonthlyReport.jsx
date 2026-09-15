@@ -93,7 +93,7 @@ export default function MonthlyReport() {
   const monthTotal = monthActiveReceipts.reduce((s, id) => s + parseMoney(receipts[id].total), 0);
   const monthCount = monthActiveReceipts.length;
   const monthWeight = monthActiveReceipts.reduce((s, id) => s + parseWeightKg(receipts[id].weight), 0);
-  const totalDeductionKg = activeReceipts.reduce((s, id) => s + (receipts[id].deductionWeight || 0), 0);
+  const totalDeductionKg = monthActiveReceipts.reduce((s, id) => s + (receipts[id].deductionWeight || 0), 0);
 
   // Real day-by-day chart built from each receipt's actual date, grouped into this month
   // vs. the previous calendar month, instead of fixed illustrative demo figures.
