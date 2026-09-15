@@ -139,6 +139,25 @@ export function ProductsProvider({ children }) {
     });
   }
 
+  // Restoring a delivery's stock commitment (see Deliveries.jsx delete/edit) needs to operate
+  // by id, mirroring removeStock — unlike addStock's name-based fallback (used for receipts,
+  // which never store an id), fabricating a brand-new placeholder product when the id no
+  // longer exists would corrupt the catalog instead of failing safely. If the product was
+  // deleted after the delivery was created, this just no-ops and reports that back so the
+  // caller can warn the user instead of silently losing or misattributing the stock.
+  function addStockById(id, weightKg) {
+    if (!weightKg || weightKg <= 0) return true;
+    if (!id || !products[id]) return false;
+    setProductsRaw((prev) => {
+      const p = prev[id];
+      if (!p) return prev;
+      const currentStock = parseFloat(String(p.stock).replace(/[^\d.]/g, '')) || 0;
+      const newStock = currentStock + weightKg;
+      return { ...prev, [id]: { ...p, stock: `${newStock.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.` } };
+    });
+    return true;
+  }
+
   // Voiding a receipt (see Receipts.jsx) needs to give back the stock its purchase added,
   // but receipts only ever recorded item names — not ids — matching how addStock above looks
   // products up, so this mirrors that name-based lookup instead of removeStock's id-based one.
@@ -157,7 +176,7 @@ export function ProductsProvider({ children }) {
   }
 
   return (
-    <ProductsContext.Provider value={{ products, setProducts: setProductsRaw, order, setOrder, updatePrice, addStock, removeStock, removeStockByName }}>
+    <ProductsContext.Provider value={{ products, setProducts: setProductsRaw, order, setOrder, updatePrice, addStock, addStockById, removeStock, removeStockByName }}>
       {children}
     </ProductsContext.Provider>
   );

@@ -263,7 +263,10 @@ export default function ScrapPurchase() {
   }
 
   function addBlankRow() {
-    setRows((prev) => [...prev, { id: nextRowId++, name: 'รายการใหม่', icon: IconBox, bg: 'var(--bg)', fg: 'var(--ink-500)', price: '', weight: '' }]);
+    // Computed outside the updater — StrictMode double-invokes updaters in dev, so
+    // incrementing nextRowId inside it would burn two ids per click instead of one.
+    const id = nextRowId++;
+    setRows((prev) => [...prev, { id, name: 'รายการใหม่', icon: IconBox, bg: 'var(--bg)', fg: 'var(--ink-500)', price: '', weight: '' }]);
   }
 
   function selectCustomer(c) {
@@ -403,6 +406,12 @@ export default function ScrapPurchase() {
         // the formatted string would be fragile.
         netWeight: rowNetWeight(r),
         t: money(rowNetTotal(r)),
+        // Snapshot the product's category at purchase time — Categories.jsx sums revenue per
+        // category from receipt history, and deriving the category from the live product list
+        // instead would make a product's entire purchase history vanish from its category's
+        // stats the moment that product gets deleted, even though nothing about the past
+        // receipts changed.
+        cat: Object.values(products).find((p) => p.name === r.name)?.cat || null,
       })),
       total: money(grandTotal),
       // Which deduction reasons this receipt actually incremented usage on, and by how much —
