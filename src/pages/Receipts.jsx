@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { exportCsv } from '../lib/csvExport.js';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
@@ -85,6 +85,15 @@ export default function Receipts() {
   const [dateFilter, setDateFilter] = useState('');
   const [selectedId, setSelectedId] = useState(order[0]);
   const [banner, setBanner] = useState(null);
+  // Below ~1100px the list and preview panel stack vertically instead of sitting side by
+  // side (see .grid's media query in common.css) — on that layout, clicking "ดูตัวอย่าง"/
+  // "แก้ไขใบเสร็จ"/"ยกเลิกใบเสร็จ" only updates the panel's content, which can sit well below
+  // the table and off-screen, looking like the click did nothing. Scroll it into view on
+  // every such action so the result is always visible regardless of viewport width.
+  const previewRef = useRef(null);
+  function scrollToPreview() {
+    previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
   const [activity, setActivity] = usePersistentState('scrapshop_receipts_activity', []);
   const [printedIds, setPrintedIds] = usePersistentState('scrapshop_receipts_printed_ids', []);
   // Separate, timestamped log for the "พิมพ์ซ้ำเดือนนี้" stat — `activity` below is a generic
@@ -170,6 +179,9 @@ export default function Receipts() {
       setIsEditing(false);
       setEditForm(null);
     }
+    // Voiding from the row menu can target a receipt other than the one currently shown in
+    // the preview panel — select it so the panel reflects the receipt that was just voided.
+    setSelectedId(id);
     setReceipts((prev) => ({ ...prev, [id]: { ...prev[id], status: 'void', voidedAt: Date.now() } }));
     // A voided purchase never happened, so give back what it took: the stock it added
     // (matched by item name, mirroring how ScrapPurchase.jsx's addStock looked it up) and
@@ -187,6 +199,7 @@ export default function Receipts() {
     }
     logActivity(`ยกเลิก ${target.no}`);
     setBanner({ type: 'error', text: `ยกเลิกใบเสร็จ ${target.no} แล้ว — คืนสต็อกสินค้าและยอดสะสมลูกค้าที่เกี่ยวข้องแล้ว` });
+    scrollToPreview();
   }
 
   function handlePrint() {
@@ -219,6 +232,7 @@ export default function Receipts() {
   function selectRow(id) {
     if (isEditing && id !== editForm?.id) setIsEditing(false);
     setSelectedId(id);
+    scrollToPreview();
   }
 
   function startEdit(id = selectedId) {
@@ -254,6 +268,7 @@ export default function Receipts() {
       deductionLabel: r.deductionLabel || '',
     });
     setIsEditing(true);
+    scrollToPreview();
   }
 
   function cancelEdit() {
@@ -539,7 +554,7 @@ export default function Receipts() {
           </div>
         </div>
 
-        <div className="summary-sticky">
+        <div className="summary-sticky" ref={previewRef}>
           <div className="receipt-shell">
             {!selected ? (
               <div className="empty-hint" style={{ padding: '40px 20px', textAlign: 'center' }}>
@@ -660,7 +675,7 @@ export default function Receipts() {
                 </div>
                 <div className="paper-meta">
                   <span>ผู้ออกใบเสร็จ</span>
-                  <b>เจ้าของร้าน</b>
+                  <b>{selected.issuedBy || 'เจ้าของร้าน'}</b>
                 </div>
                 <hr className="paper-divider" />
 
