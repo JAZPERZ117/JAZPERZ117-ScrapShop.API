@@ -263,7 +263,10 @@ export default function ScrapPurchase() {
   }
 
   function addBlankRow() {
-    setRows((prev) => [...prev, { id: nextRowId++, name: 'รายการใหม่', icon: IconBox, bg: 'var(--bg)', fg: 'var(--ink-500)', price: '', weight: '' }]);
+    // Computed outside the updater — StrictMode double-invokes updaters in dev, so
+    // incrementing nextRowId inside it would burn two ids per click instead of one.
+    const id = nextRowId++;
+    setRows((prev) => [...prev, { id, name: 'รายการใหม่', icon: IconBox, bg: 'var(--bg)', fg: 'var(--ink-500)', price: '', weight: '' }]);
   }
 
   function selectCustomer(c) {
@@ -387,6 +390,10 @@ export default function ScrapPurchase() {
       // alongside `cust` (the display name) rather than replacing it. Walk-in sales
       // legitimately have no id — that's fine, there's no customer ledger to reverse.
       custId: selectedCustomer?.id || null,
+      // The Receipts.jsx preview panel used to just hardcode "เจ้าของร้าน" here regardless of
+      // who was actually logged in — persist the real issuer name onto the receipt itself,
+      // same fallback as the print snapshot below.
+      issuedBy: user?.displayName || 'เจ้าของร้าน',
       init: cust.init || initials(cust.name),
       bg: cust.bg || 'var(--green-100)',
       fg: cust.fg || 'var(--green-700)',
@@ -407,6 +414,12 @@ export default function ScrapPurchase() {
         // the formatted string would be fragile.
         netWeight: rowNetWeight(r),
         t: money(rowNetTotal(r)),
+        // Snapshot the product's category at purchase time — Categories.jsx sums revenue per
+        // category from receipt history, and deriving the category from the live product list
+        // instead would make a product's entire purchase history vanish from its category's
+        // stats the moment that product gets deleted, even though nothing about the past
+        // receipts changed.
+        cat: Object.values(products).find((p) => p.name === r.name)?.cat || null,
       })),
       total: money(grandTotal),
       // Which deduction reasons this receipt actually incremented usage on, and by how much —

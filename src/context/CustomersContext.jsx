@@ -63,7 +63,15 @@ export function CustomersProvider({ children }) {
     for (const id in customersRaw) {
       const c = customersRaw[id];
       const idDaysLeft = daysUntil(c.idExpiry);
-      out[id] = { ...c, idDaysLeft, idWarn: idDaysLeft <= ID_WARN_WINDOW_DAYS };
+      // "since" is derived from the real createdAt instead of trusting BLANK_CUSTOMER's
+      // hardcoded seed value — otherwise every newly added customer would forever show
+      // the same frozen "พ.ค. 2567" regardless of when they were actually added. Customers
+      // created before createdAt existed have no way to know their real join date, so they
+      // keep whatever "since" value they already have.
+      const since = c.createdAt
+        ? new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'short', year: 'numeric' }).format(new Date(c.createdAt))
+        : c.since;
+      out[id] = { ...c, idDaysLeft, idWarn: idDaysLeft <= ID_WARN_WINDOW_DAYS, since };
     }
     return out;
   }, [customersRaw]);

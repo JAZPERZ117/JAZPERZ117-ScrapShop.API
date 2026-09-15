@@ -3,7 +3,7 @@ import { IconCalendarBars, IconDownload, IconPrint, IconCategory, IconClockHisto
 import { exportCsv } from '../lib/csvExport.js';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
-import { useCustomers, INITIAL_ORDER as CUSTOMERS_INITIAL_ORDER } from '../context/CustomersContext.jsx';
+import { useCustomers } from '../context/CustomersContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import './AnnualReport.css';
@@ -32,7 +32,7 @@ const CURRENT_YEAR_BE = new Date().getFullYear() + 543;
 export default function AnnualReport() {
   const { receipts, order: receiptOrder } = useReceipts();
   const { products } = useProducts();
-  const { order: customerOrder } = useCustomers();
+  const { order: customerOrder, customers } = useCustomers();
   const { payHistory } = usePayroll();
   const { settings } = useSettings();
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
@@ -106,7 +106,12 @@ export default function AnnualReport() {
     .filter((p) => new Date(p.paidAt).getFullYear() === currentYear)
     .reduce((s, p) => s + (p.net || 0), 0);
   const netProfit = Math.max(ytdRevenue - wagesPaid, 0);
-  const newCustomerIds = customerOrder.filter((id) => !CUSTOMERS_INITIAL_ORDER.includes(id));
+  // "ลูกค้าใหม่ทั้งปี" means new this calendar year, not "ever added since install" — scope by
+  // actual createdAt instead of just excluding the seed customers.
+  const newCustomerIds = customerOrder.filter((id) => {
+    const createdAt = customers[id]?.createdAt;
+    return createdAt && new Date(createdAt).getFullYear() === currentYear;
+  });
 
   const breakdown = useMemo(() => {
     const byCat = {};
