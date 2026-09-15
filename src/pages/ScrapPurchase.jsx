@@ -386,6 +386,10 @@ export default function ScrapPurchase() {
       // alongside `cust` (the display name) rather than replacing it. Walk-in sales
       // legitimately have no id — that's fine, there's no customer ledger to reverse.
       custId: selectedCustomer?.id || null,
+      // The Receipts.jsx preview panel used to just hardcode "เจ้าของร้าน" here regardless of
+      // who was actually logged in — persist the real issuer name onto the receipt itself,
+      // same fallback as the print snapshot below.
+      issuedBy: user?.displayName || 'เจ้าของร้าน',
       init: cust.init || initials(cust.name),
       bg: cust.bg || 'var(--green-100)',
       fg: cust.fg || 'var(--green-700)',
