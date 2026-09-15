@@ -230,4 +230,43 @@ db.exec(`
   );
 `);
 
+// Scale devices (name, port, calibration state, which one is "main") used to live only in each
+// browser's own localStorage — ScrapPurchase.jsx reads whichever device is flagged `active` as
+// the one to weigh purchases on, so that flag specifically needs to be the same device on every
+// till, not a per-browser guess. `sort_order` matches the categories convention (explicit column,
+// not creation time) because this page has two different "where does the new row land" rules:
+// manually adding a device puts it first, a network scan finding one appends it last.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS scales (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT 'ไม่ระบุรุ่น',
+    bg TEXT NOT NULL DEFAULT 'var(--bg)',
+    fg TEXT NOT NULL DEFAULT 'var(--ink-500)',
+    port TEXT NOT NULL DEFAULT '—',
+    conn TEXT NOT NULL DEFAULT 'สาย USB / RS-232',
+    max TEXT NOT NULL DEFAULT '—',
+    res TEXT NOT NULL DEFAULT '—',
+    cal TEXT NOT NULL DEFAULT 'ยังไม่เคยสอบเทียบ',
+    due TEXT NOT NULL DEFAULT '—',
+    status TEXT NOT NULL DEFAULT 'off',
+    active INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// Calibration/discovery/removal log shown under the device table — capped at the 20 most recent
+// entries on read, same "shared across every device" reasoning as the scales table itself.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS scale_activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    icon TEXT NOT NULL DEFAULT 'ok',
+    title TEXT NOT NULL DEFAULT '',
+    sub TEXT NOT NULL DEFAULT '',
+    amt TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;

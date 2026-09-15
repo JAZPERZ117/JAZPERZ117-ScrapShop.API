@@ -113,3 +113,21 @@ INITIAL_CATEGORIES.forEach((c, i) => {
   ).run(c.id, c.name, c.iconKey, c.color, c.desc, c.isActive, i);
   console.log(`สร้างหมวดหมู่ตั้งต้นสำเร็จ: ${c.name}`);
 });
+
+// Starting scale devices (see src/context/ScalesContext.jsx's old INITIAL_DEVICES). A real
+// deployment keeps this device list as a starting point (renamed/edited later by the shop), but
+// starts with no calibration history — that hasn't happened yet. "main" ships as the one flagged
+// active, matching the old client-side default.
+const INITIAL_SCALES = [
+  { id: 'main', name: 'เครื่องชั่งหลัก', model: 'CAS DB-II 300kg', bg: 'var(--blue-bg)', fg: 'var(--blue)', port: 'COM4', conn: 'สาย USB / RS-232', max: '300 กก.', res: '0.01 กก.', status: 'on', active: 1 },
+  { id: 'dock', name: 'เครื่องชั่งลานหลังร้าน', model: 'Yamato DP-6900 500kg', bg: 'var(--plum-bg)', fg: 'var(--plum)', port: 'YM-6900-A2', conn: 'Bluetooth', max: '500 กก.', res: '0.1 กก.', status: 'on', active: 0 },
+  { id: 'mobile', name: 'เครื่องชั่งเคลื่อนที่', model: 'Tanita KD-200 60kg', bg: 'var(--bg)', fg: 'var(--ink-500)', port: 'COM7', conn: 'สาย USB / RS-232', max: '60 กก.', res: '0.005 กก.', status: 'off', active: 0 },
+];
+INITIAL_SCALES.forEach((s, i) => {
+  const already = db.prepare('SELECT id FROM scales WHERE id = ?').get(s.id);
+  if (already) return;
+  db.prepare(
+    'INSERT INTO scales (id, name, model, bg, fg, port, conn, max, res, status, active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(s.id, s.name, s.model, s.bg, s.fg, s.port, s.conn, s.max, s.res, s.status, s.active, i);
+  console.log(`สร้างเครื่องชั่งตั้งต้นสำเร็จ: ${s.name}`);
+});

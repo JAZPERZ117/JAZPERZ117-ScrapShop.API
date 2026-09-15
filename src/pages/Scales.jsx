@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { IconScale, IconCheck, IconPlus, IconTare, IconRefresh, IconClockHistory, IconWarningTriangle, IconX, IconEdit, IconTrash } from '../icons.jsx';
 import RowMenu from '../components/RowMenu.jsx';
 import { useScales, BLANK_DEVICE } from '../context/ScalesContext.jsx';
@@ -18,7 +18,7 @@ const DISCOVERABLE_POOL = [
 ];
 
 export default function Scales() {
-  const { devices, setDevices, order, setOrder, activity, logActivity, toggleConnected } = useScales();
+  const { devices, order, activity, logActivity, createDevice, updateDevice, setActiveDevice, toggleConnected, deleteDevice } = useScales();
   const [selectedId, setSelectedId] = useState(order[0]);
   const [liveWeight, setLiveWeight] = useState(0);
   const [editName, setEditName] = useState(devices[order[0]]?.name || '');
@@ -28,6 +28,14 @@ export default function Scales() {
   const [newName, setNewName] = useState('');
   const [newModel, setNewModel] = useState('');
   const [banner, setBanner] = useState(null);
+
+  // Devices now load asynchronously from the server (see ScalesContext.jsx), so `order` is
+  // still empty on the very first render — select the first real device once data actually
+  // loads, same fix already applied to Products/Receipts/Deliveries/Payroll/Deductions/Categories.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) selectDevice(order[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, selectedId]);
 
   const d = devices[selectedId];
   const connectedCount = order.filter((id) => devices[id].status === 'on').length;
@@ -60,61 +68,72 @@ export default function Scales() {
     setLiveWeight(0);
   }
   // "ใช้เป็นเครื่องชั่งหลัก" is exclusive — only one device can be the one ScrapPurchase.jsx
-  // reads from, so turning it on for this device turns it off for every other one.
-  function toggleActive() {
-    setDevices((prev) => {
-      const turningOn = !prev[selectedId].active;
-      const next = {};
-      for (const id in prev) {
-        next[id] = { ...prev[id], active: id === selectedId ? turningOn : turningOn ? false : prev[id].active };
-      }
-      return next;
-    });
+  // reads from, so the server clears every other device's flag in the same request.
+  async function toggleActive() {
+    try {
+      await setActiveDevice(selectedId, !d.active);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
-  function handleScan() {
+  async function handleScan() {
     const found = DISCOVERABLE_POOL.find((dev) => !order.includes(dev.id));
     if (!found) {
       setBanner({ type: 'info', text: 'สแกนเครือข่ายแล้ว — ไม่พบเครื่องชั่งใหม่เพิ่มเติม' });
       return;
     }
-    const { id, ...rest } = found;
-    setDevices((prev) => ({ ...prev, [id]: rest }));
-    setOrder((prev) => [...prev, id]);
-    logActivity({ icon: 'ok', title: `พบเครื่องชั่งใหม่ · ${rest.name}`, sub: `${todayThai} · ${nowTimeStr()} จากการสแกนเครือข่าย`, amt: 'เพิ่มเข้าระบบแล้ว' });
+    const { id: _id, ...rest } = found;
+    try {
+      await createDevice({ ...rest, atEnd: true });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    await logActivity({ icon: 'ok', title: `พบเครื่องชั่งใหม่ · ${rest.name}`, sub: `${todayThai} · ${nowTimeStr()} จากการสแกนเครือข่าย`, amt: 'เพิ่มเข้าระบบแล้ว' });
     setBanner({ type: 'success', text: `สแกนเครือข่ายพบเครื่องชั่งใหม่ 1 เครื่อง: "${rest.name}" — เพิ่มเข้าระบบแล้ว` });
   }
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
     if (!newName.trim()) return;
-    const id = `new_${Date.now()}`;
-    const created = { ...BLANK_DEVICE, name: newName.trim(), model: newModel.trim() || BLANK_DEVICE.model };
-    setDevices((prev) => ({ ...prev, [id]: created }));
-    setOrder((prev) => [id, ...prev]);
-    setSelectedId(id);
-    setEditName(created.name);
-    setEditConn(created.conn);
-    setEditPort(created.port);
+    let created;
+    try {
+      created = await createDevice({ ...BLANK_DEVICE, name: newName.trim(), model: newModel.trim() || BLANK_DEVICE.model });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    selectDevice(created.id);
     setNewName('');
     setNewModel('');
     setShowNew(false);
     setBanner({ type: 'success', text: `เพิ่มเครื่องชั่ง ${newName.trim()} เรียบร้อยแล้ว` });
   }
 
-  function handleSave() {
-    setDevices((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], name: editName.trim() || prev[selectedId].name, conn: editConn, port: editPort } }));
+  async function handleSave() {
+    try {
+      await updateDevice(selectedId, { name: editName.trim() || d.name, conn: editConn, port: editPort });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     setBanner({ type: 'success', text: `บันทึกการตั้งค่าของ "${editName.trim() || d.name}" แล้ว` });
   }
 
-  function handleCalibrate() {
+  async function handleCalibrate() {
     const drift = (Math.random() * 0.1).toFixed(2);
-    setDevices((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], cal: todayThai, due: '90 วัน', status: 'on' } }));
-    logActivity({ icon: 'ok', title: `สอบเทียบสำเร็จ · ${d.name}`, sub: `${todayThai} · ${nowTimeStr()} โดยเจ้าของร้าน`, amt: `คลาดเคลื่อน ${drift} กก.` });
+    try {
+      await updateDevice(selectedId, { cal: todayThai, due: '90 วัน', status: 'on' });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    await logActivity({ icon: 'ok', title: `สอบเทียบสำเร็จ · ${d.name}`, sub: `${todayThai} · ${nowTimeStr()} โดยเจ้าของร้าน`, amt: `คลาดเคลื่อน ${drift} กก.` });
     setBanner({ type: 'success', text: `สอบเทียบ "${d.name}" สำเร็จ — คลาดเคลื่อน ${drift} กก.` });
   }
 
-  function handleRemove(id = selectedId) {
+  async function handleRemove(id = selectedId) {
     // ScrapPurchase.jsx reads `scaleDevices[mainScaleId]` unconditionally, so letting the last
     // scale device be removed would leave that page with no device to fall back to and crash
     // it on the next visit.
@@ -124,18 +143,18 @@ export default function Scales() {
     }
     const target = devices[id];
     if (!window.confirm(`ยืนยันนำเครื่องชั่ง "${target.name}" ออกจากระบบ?`)) return;
-    const remaining = order.filter((oid) => oid !== id);
-    setOrder(remaining);
-    setDevices((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    try {
+      await deleteDevice(id);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     if (id === selectedId) {
+      const remaining = order.filter((oid) => oid !== id);
       if (remaining[0]) selectDevice(remaining[0]);
       else setSelectedId(null);
     }
-    logActivity({ icon: 'warn', title: `นำเครื่องชั่งออกจากระบบ · ${target.name}`, sub: `${todayThai} · ${nowTimeStr()}`, amt: 'นำออกแล้ว' });
+    await logActivity({ icon: 'warn', title: `นำเครื่องชั่งออกจากระบบ · ${target.name}`, sub: `${todayThai} · ${nowTimeStr()}`, amt: 'นำออกแล้ว' });
     setBanner({ type: 'error', text: `นำเครื่องชั่ง "${target.name}" ออกจากระบบแล้ว` });
   }
 
