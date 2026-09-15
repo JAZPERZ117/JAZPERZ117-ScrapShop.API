@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePayroll, DAY_LABELS, ATTENDANCE_LABEL, PAY_METHOD_LABELS, attendanceTotal, attendanceFromDays } from '../context/PayrollContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
@@ -89,7 +89,7 @@ function thisWeekDates() {
 
 export default function Payroll() {
   const navigate = useNavigate();
-  const { staff, setStaff, order, setOrder, payHistory, addPayHistory } = usePayroll();
+  const { staff, order, payHistory, createStaff, updateStaff, deleteStaff, payStaff } = usePayroll();
   const { settings } = useSettings();
   const [selectedId, setSelectedId] = useState(order[0]);
   const [filter, setFilter] = useState('all');
@@ -106,38 +106,50 @@ export default function Payroll() {
   const [lastUpdated, setLastUpdated] = usePersistentState('scrapshop_payroll_last_updated', '10:42 น.');
   const [printSnapshot, setPrintSnapshot] = useState(null);
   const weekDates = useMemo(() => thisWeekDates(), []);
+  // Local, not-yet-saved edits for the currently-selected staff member's week (attendance,
+  // days, advance, other amount/reason, paid) — kept in component state instead of writing to
+  // the server on every keystroke (see PayrollContext.jsx), matching every other edit form in
+  // this app. Committed to the server only via "บันทึกร่าง" or "จ่ายเงิน"; cleared whenever the
+  // selection changes so switching staff never leaks one person's unsaved draft onto another.
+  const [draft, setDraft] = useState({});
+
+  // Staff now loads asynchronously from the server (see PayrollContext.jsx), so `order` is
+  // still empty on the very first render — select the first real staff member once data
+  // actually loads, same fix already applied to Receipts/Products/Customers.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) selectStaff(order[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, selectedId]);
 
   // The app has no resignation-tracking feature at all, so a "ลาออก" count could never be
   // anything but a hardcoded, permanently-0 placeholder — replaced with a real distinct-role
   // count of the current roster instead.
   const roleCount = useMemo(() => new Set(order.map((id) => staff[id].role.split(' · ')[0])).size, [order, staff]);
 
-  const s = staff[selectedId];
-  const net = Math.max(dailyRate(s.base) * (parseFloat(s.days) || 0) - (parseFloat(s.advance) || 0) + (parseFloat(s.otherAmount) || 0), 0);
+  // Merges the selected staff member's saved server data with any not-yet-saved local draft,
+  // so every existing `s.xxx` read below reflects what's actually on screen right now.
+  const s = useMemo(() => ({ ...staff[selectedId], ...draft }), [staff, selectedId, draft]);
   const totalWeeklyDue = useMemo(() => order.reduce((sum, id) => sum + netPay(staff[id]), 0), [order, staff]);
+  const net = Math.max(dailyRate(s.base) * (parseFloat(s.days) || 0) - (parseFloat(s.advance) || 0) + (parseFloat(s.otherAmount) || 0), 0);
 
   function touchUpdated() {
     setLastUpdated(nowTimeStr());
   }
 
-  // Writes straight into the persisted staff record on every keystroke so a value
-  // is never lost by switching to another staff member or reloading before saving.
+  // Updates only the local draft — nothing reaches the server until "บันทึกร่าง"/"จ่ายเงิน".
   function updateStaffField(key, value) {
-    setStaff((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], [key]: value } }));
+    setDraft((prev) => ({ ...prev, [key]: value }));
   }
 
   // Cycles one day's attendance (เต็มวัน → ครึ่งวัน → ขาด → เต็มวัน...) and recomputes the
   // week's total from the real per-day breakdown, instead of trusting a manually-typed sum.
   const CYCLE = ['full', 'half', 'off'];
   function toggleAttendanceDay(dayIndex) {
-    setStaff((prev) => {
-      const cur = prev[selectedId];
-      const attendance = [...(cur.attendance || attendanceFromDays(cur.days))];
-      attendance[dayIndex] = CYCLE[(CYCLE.indexOf(attendance[dayIndex] || 'off') + 1) % CYCLE.length];
-      // Logging attendance for a period that was already marked paid means it's a new,
-      // not-yet-paid week — flip paid back off so the Pay button re-enables for it.
-      return { ...prev, [selectedId]: { ...cur, attendance, days: attendanceTotal(attendance), paid: false } };
-    });
+    const attendance = [...(s.attendance || attendanceFromDays(s.days))];
+    attendance[dayIndex] = CYCLE[(CYCLE.indexOf(attendance[dayIndex] || 'off') + 1) % CYCLE.length];
+    // Logging attendance for a period that was already marked paid means it's a new,
+    // not-yet-paid week — flip paid back off so the Pay button re-enables for it.
+    setDraft((prev) => ({ ...prev, attendance, days: attendanceTotal(attendance), paid: false }));
   }
 
   const rows = useMemo(
@@ -150,12 +162,20 @@ export default function Payroll() {
     [filter, staff, order]
   );
 
+  // `staff[selectedId]` can briefly be missing (initial async load, or right after a delete
+  // before re-selecting) — bail out rather than rendering a detail panel built from a blank
+  // `s` (dailyRate(undefined), s.role.split(...), etc.). Placed after every hook above so the
+  // hook call order stays identical across renders regardless of which branch this takes.
+  if (!s.id) return null;
+
   function selectStaff(id) {
     setSelectedId(id);
     setEditStaffName(staff[id].name);
     setEditStaffRole(staff[id].role.split(' · ')[0]);
     setEditStaffBase(String(staff[id].base));
     setEditOpen(false);
+    // Switching staff must not carry one person's unsaved draft onto another.
+    setDraft({});
   }
 
   function otherReasonLabel() {
@@ -168,49 +188,58 @@ export default function Payroll() {
     setEditOpen(true);
   }
 
-  function handleSaveStaff() {
+  async function handleSaveStaff() {
     const tenureSuffix = s.role.split(' · ').slice(1).join(' · ');
     const nextRole = tenureSuffix ? `${editStaffRole} · ${tenureSuffix}` : editStaffRole;
-    setStaff((prev) => ({
-      ...prev,
-      [selectedId]: {
-        ...prev[selectedId],
-        name: editStaffName.trim() || prev[selectedId].name,
+    try {
+      await updateStaff(selectedId, {
+        name: editStaffName.trim() || s.name,
         role: nextRole,
-        base: parseFloat(editStaffBase) || prev[selectedId].base,
-      },
-    }));
+        base: parseFloat(editStaffBase) || s.base,
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     setEditOpen(false);
     touchUpdated();
     setBanner({ type: 'success', text: `บันทึกข้อมูลพนักงาน ${editStaffName.trim() || s.name} เรียบร้อยแล้ว` });
   }
 
-  function handleDeleteStaff(id = selectedId) {
-    // The pay panel reads `staff[selectedId]` unconditionally (dailyRate(s.base) etc.), so
-    // letting the last staff record be deleted would leave selectedId pointing at nothing
-    // and crash the whole page on the next render.
+  async function handleDeleteStaff(id = selectedId) {
+    // The pay panel reads `s` unconditionally (dailyRate(s.base) etc.), so letting the last
+    // staff record be deleted would leave selectedId pointing at nothing and crash the page.
     if (order.length <= 1) {
       setBanner({ type: 'error', text: 'ต้องมีลูกน้องอย่างน้อย 1 คน ไม่สามารถลบคนสุดท้ายได้' });
       return;
     }
     const target = staff[id];
     if (!window.confirm(`ยืนยันลบข้อมูลพนักงาน "${target.name}"?`)) return;
+    try {
+      await deleteStaff(id);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     const remaining = order.filter((oid) => oid !== id);
-    setOrder(remaining);
-    setStaff((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
     if (id === selectedId && remaining[0]) selectStaff(remaining[0]);
     touchUpdated();
     setBanner({ type: 'error', text: `ลบข้อมูลพนักงาน "${target.name}" แล้ว` });
   }
 
-  function toggleStaffPaid(id) {
+  async function toggleStaffPaid(id) {
     const target = staff[id];
     const nextPaid = !target.paid;
-    setStaff((prev) => ({ ...prev, [id]: { ...prev[id], paid: nextPaid } }));
+    try {
+      await updateStaff(id, { paid: nextPaid });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    // Keep the local draft's view of `paid` in sync if this toggle happened to target the
+    // staff member currently open in the detail panel — otherwise the draft's stale override
+    // would keep showing the old paid state until the next full reselect.
+    if (id === selectedId) setDraft((prev) => ({ ...prev, paid: nextPaid }));
     touchUpdated();
     setBanner({
       type: nextPaid ? 'success' : 'error',
@@ -218,7 +247,7 @@ export default function Payroll() {
     });
   }
 
-  function handlePay() {
+  async function handlePay() {
     const payNo = 'PV' + Date.now().toString().slice(-9);
     const now = new Date();
     const timeStr = nowTimeStr();
@@ -228,6 +257,29 @@ export default function Payroll() {
     const finalOtherLabel = otherReasonLabel();
     const finalNet = Math.max(dailyRate(s.base) * finalDays - finalAdvance + finalOther, 0);
     const finalAttendance = s.attendance || attendanceFromDays(s.days);
+    // Pay period is weekly: record the payment and reset attendance/advances server-side in
+    // one call, so the next week starts fresh only once the payment itself is actually saved.
+    try {
+      await payStaff(selectedId, {
+        no: payNo,
+        time: timeStr,
+        paidAt: now.toISOString(),
+        weekKey: weekKeyOf(now),
+        weekLabel: weekLabelOf(now),
+        days: finalDays,
+        maxDays: s.maxDays,
+        attendance: finalAttendance,
+        base: s.base,
+        advance: finalAdvance,
+        otherAmount: finalOther,
+        otherLabel: finalOtherLabel,
+        net: finalNet,
+        payMethod,
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     setPrintSnapshot({
       no: payNo,
       time: timeStr,
@@ -245,84 +297,64 @@ export default function Payroll() {
       net: finalNet,
       payMethod,
     });
-    // Pay period is weekly: record the payment, then reset attendance/advances so the next week starts fresh.
-    setStaff((prev) => ({
-      ...prev,
-      [selectedId]: { ...prev[selectedId], days: 0, attendance: attendanceFromDays(0), advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: true },
-    }));
-    addPayHistory({
-      no: payNo,
-      time: timeStr,
-      paidAt: now.toISOString(),
-      weekKey: weekKeyOf(now),
-      weekLabel: weekLabelOf(now),
-      staffId: selectedId,
-      staffName: s.name,
-      staffRole: s.role,
-      days: finalDays,
-      maxDays: s.maxDays,
-      attendance: finalAttendance,
-      base: s.base,
-      advance: finalAdvance,
-      otherAmount: finalOther,
-      otherLabel: finalOtherLabel,
-      net: finalNet,
-      payMethod,
-    });
+    // The server already reset days/attendance/advance/other and marked paid — clear the local
+    // draft so `s` falls back to that fresh server state instead of showing stale overrides.
+    setDraft({});
     touchUpdated();
     setBanner({ type: 'success', text: `จ่ายเงินเดือน ${s.name} เรียบร้อยแล้ว ยอดสุทธิ ${money(finalNet)} — เริ่มบันทึกวันทำงานรอบสัปดาห์ใหม่ได้เลย` });
     setTimeout(() => window.print(), 50);
   }
 
-  // Fields already auto-save on every keystroke via updateStaffField; this just normalizes
-  // (clamps days, parses numbers) and gives the user an explicit confirmation banner.
-  function handleSaveDraft() {
+  // The draft above already keeps every keystroke locally; this is the one point that
+  // actually reaches the server — normalizes (clamps days, parses numbers) and saves it.
+  async function handleSaveDraft() {
     const finalDays = clampDays(s.days, s.maxDays);
     const finalAdvance = parseFloat(s.advance) || 0;
     const finalOther = parseFloat(s.otherAmount) || 0;
-    setStaff((prev) => ({
-      ...prev,
-      [selectedId]: {
-        ...prev[selectedId],
+    const finalAttendance = s.attendance || attendanceFromDays(finalDays);
+    const finalOtherCustomReason = (s.otherCustomReason || '').trim();
+    try {
+      await updateStaff(selectedId, {
         days: finalDays,
+        attendance: finalAttendance,
         advance: finalAdvance,
         otherAmount: finalOther,
-        otherCustomReason: (prev[selectedId].otherCustomReason || '').trim(),
-      },
-    }));
+        otherReasonId: s.otherReasonId || '',
+        otherCustomReason: finalOtherCustomReason,
+        paid: s.paid,
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    setDraft({});
     touchUpdated();
     setBanner({ type: 'success', text: `บันทึกวันทำงาน (${finalDays} วัน) เบิกล่วงหน้า และเงินเพิ่มอื่นๆ ของ ${s.name} ไว้แล้ว — ยังไม่ได้จ่ายเงิน` });
   }
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
     if (!newName.trim()) return;
-    const id = `new_${Date.now()}`;
     const base = parseFloat(newBase) || 0;
-    const created = {
-      name: newName.trim(),
-      role: `${newRole} · เริ่มงานใหม่`,
-      init: newName.trim().replace(/^(นาย|นาง|น\.ส\.)/, '').trim().slice(0, 1) || 'ล',
-      bg: 'var(--green-100)',
-      fg: 'var(--green-700)',
-      base,
-      days: 0,
-      maxDays: MAX_DAYS_PER_WEEK,
-      attendance: attendanceFromDays(0),
-      advance: 0,
-      otherAmount: 0,
-      otherReasonId: '',
-      otherCustomReason: '',
-      paid: false,
-    };
-    setStaff((prev) => ({ ...prev, [id]: created }));
-    setOrder((prev) => [id, ...prev]);
-    setSelectedId(id);
-    setNewName('');
-    setNewBase('');
-    setShowNew(false);
-    touchUpdated();
-    setBanner({ type: 'success', text: `เพิ่มลูกน้อง ${newName.trim()} เรียบร้อยแล้ว` });
+    try {
+      const created = await createStaff({
+        name: newName.trim(),
+        role: `${newRole} · เริ่มงานใหม่`,
+        init: newName.trim().replace(/^(นาย|นาง|น\.ส\.)/, '').trim().slice(0, 1) || 'ล',
+        bg: 'var(--green-100)',
+        fg: 'var(--green-700)',
+        base,
+      });
+      setSelectedId(created.id);
+      setDraft({});
+      setNewName('');
+      setNewBase('');
+      setShowNew(false);
+      touchUpdated();
+      setBanner({ type: 'success', text: `เพิ่มลูกน้อง ${newName.trim()} เรียบร้อยแล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
   return (

@@ -56,3 +56,22 @@ for (const p of INITIAL_PRODUCTS) {
   ).run(p.id, p.name, p.cat, p.iconKey, p.bg, p.fg, p.price, p.active, spark);
   console.log(`สร้างสินค้าตั้งต้นสำเร็จ: ${p.name}`);
 }
+
+// Starting staff roster (see src/context/PayrollContext.jsx's old INITIAL_STAFF) — a real
+// shop needs these to already exist, not an empty roster, since there's no "hire the first
+// employee" onboarding flow distinct from the normal add-staff form.
+const INITIAL_STAFF = [
+  { id: 'wittaya', name: 'นายวิทยา ทองสุข', role: 'พนักงานชั่งของ', init: 'วิ', bg: 'var(--blue-bg)', fg: 'var(--blue)', base: 12000 },
+  { id: 'somsak', name: 'นายสมศักดิ์ แก้วมณี', role: 'คนขับรถรับซื้อ', init: 'สม', bg: 'var(--rose-bg)', fg: 'var(--rose)', base: 13500 },
+  { id: 'kanjana', name: 'น.ส.กาญจนา ศรีสุข', role: 'แคชเชียร์', init: 'กา', bg: 'var(--plum-bg)', fg: 'var(--plum)', base: 10500 },
+  { id: 'prasert', name: 'นายประเสริฐ แสงทอง', role: 'พนักงานคัดแยก', init: 'ปร', bg: 'var(--amber-bg)', fg: 'var(--amber)', base: 9800 },
+  { id: 'malee', name: 'นางมาลี วงศ์ไทย', role: 'พนักงานชั่งของ', init: 'มา', bg: 'var(--green-100)', fg: 'var(--green-700)', base: 12000 },
+];
+for (const s of INITIAL_STAFF) {
+  const already = db.prepare('SELECT id FROM staff WHERE id = ?').get(s.id);
+  if (already) continue;
+  db.prepare(
+    'INSERT INTO staff (id, name, role, init, bg, fg, base) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(s.id, s.name, s.role, s.init, s.bg, s.fg, s.base);
+  console.log(`สร้างพนักงานตั้งต้นสำเร็จ: ${s.name}`);
+}
