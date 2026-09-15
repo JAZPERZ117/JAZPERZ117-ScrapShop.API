@@ -86,4 +86,35 @@ db.exec(`
   );
 `);
 
+// Receipts — the core transaction record every report page (Dashboard, DailySummary, Monthly/
+// AnnualReport, TaxReport, ProductReport) reads from — used to live only in each browser's own
+// localStorage. A sale rung up on one device needs to show up in every other device's "today's
+// receipts" and totals immediately, not stay invisible until someone happens to look at that
+// one browser. `no` (the receipt number, e.g. "RC123456789") is the real primary key here, same
+// as it already was as the object key in the old client-side `receipts` map — no separate id.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS receipts (
+    no TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    time TEXT NOT NULL DEFAULT '',
+    cust TEXT NOT NULL DEFAULT '',
+    cust_id TEXT,
+    issued_by TEXT NOT NULL DEFAULT '',
+    init TEXT NOT NULL DEFAULT '',
+    bg TEXT NOT NULL DEFAULT '',
+    fg TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'ok',
+    weight TEXT NOT NULL DEFAULT '0.00 กก.',
+    deduction_weight REAL NOT NULL DEFAULT 0,
+    deduction_label TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL DEFAULT '',
+    items TEXT NOT NULL DEFAULT '[]',
+    total TEXT NOT NULL DEFAULT '฿0.00',
+    deduction_usage TEXT NOT NULL DEFAULT '[]',
+    voided_at INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;

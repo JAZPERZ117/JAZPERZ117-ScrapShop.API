@@ -1,53 +1,78 @@
-import { createContext, useContext, useEffect } from 'react';
-import { usePersistentState } from '../lib/persist.js';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { getToken } from '../lib/auth.js';
 
-function todayISO() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function authHeaders() {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` };
 }
-
-// Real deployment: no receipts exist yet until the shop actually starts making sales.
-export const INITIAL_RECEIPTS = {};
-
-export const INITIAL_ORDER = [];
 
 const ReceiptsContext = createContext(null);
 
 export function ReceiptsProvider({ children }) {
-  const [receipts, setReceipts] = usePersistentState('scrapshop_receipts', INITIAL_RECEIPTS);
-  const [order, setOrder] = usePersistentState('scrapshop_receipts_order', INITIAL_ORDER);
+  const [receipts, setReceipts] = useState({});
+  const [order, setOrder] = useState([]);
 
-  // One-time migration: receipts used to have no real calendar date (only a time-of-day
-  // string), so the date filter on the Receipts page had nothing to filter by. Anything
-  // saved before this gets backfilled with today's date so it doesn't just disappear.
-  useEffect(() => {
-    const today = todayISO();
-    setReceipts((prev) => {
-      let changed = false;
-      const next = {};
-      for (const id in prev) {
-        if (!prev[id].date) {
-          changed = true;
-          next[id] = { ...prev[id], date: today };
-        } else {
-          next[id] = prev[id];
-        }
+  // Receipts — the core transaction record every report page reads from — used to live only
+  // in this browser's own localStorage. A sale rung up on one device needs to show up in every
+  // other device's "today's receipts" and totals immediately, not stay invisible until someone
+  // happens to look at that one browser. Fetched from the real database behind requireAuth,
+  // same as users/customers/products.
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/receipts', { headers: authHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+      const map = {};
+      const ord = [];
+      for (const r of data.receipts) {
+        map[r.no] = r;
+        ord.push(r.no);
       }
-      return changed ? next : prev;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      setReceipts(map);
+      setOrder(ord);
+    } catch {
+      // Offline or server down — leave whatever's already loaded rather than clearing it.
+    }
   }, []);
 
-  function addReceipt(data) {
-    const id = data.no;
-    const date = todayISO();
-    setReceipts((prev) => ({ ...prev, [id]: { date, ...data } }));
-    setOrder((prev) => [id, ...prev]);
-    return data;
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  async function addReceipt(data) {
+    const res = await fetch('/api/receipts', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'บันทึกใบเสร็จไม่สำเร็จ');
+    setReceipts((prev) => ({ ...prev, [result.receipt.no]: result.receipt }));
+    setOrder((prev) => [result.receipt.no, ...prev]);
+    return result.receipt;
+  }
+
+  async function voidReceipt(no) {
+    const res = await fetch(`/api/receipts/${no}/void`, { method: 'PUT', headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'ยกเลิกใบเสร็จไม่สำเร็จ');
+    setReceipts((prev) => ({ ...prev, [no]: data.receipt }));
+    return data.receipt;
+  }
+
+  async function updateReceipt(no, patch) {
+    const res = await fetch(`/api/receipts/${no}`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify(patch),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'บันทึกการแก้ไขใบเสร็จไม่สำเร็จ');
+    setReceipts((prev) => ({ ...prev, [no]: data.receipt }));
+    return data.receipt;
   }
 
   return (
-    <ReceiptsContext.Provider value={{ receipts, setReceipts, order, setOrder, addReceipt }}>
+    <ReceiptsContext.Provider value={{ receipts, order, addReceipt, voidReceipt, updateReceipt, refresh }}>
       {children}
     </ReceiptsContext.Provider>
   );

@@ -346,7 +346,7 @@ export default function ScrapPurchase() {
     setBanner({ type: 'success', text: 'บันทึกฉบับร่างเรียบร้อยแล้ว — ระบบจะดึงกลับมาให้อัตโนมัติเมื่อเปิดหน้านี้ครั้งถัดไป' });
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (rows.length === 0 || totalWeight <= 0) {
       setBanner({ type: 'error', text: 'กรุณาเพิ่มรายการสินค้าและระบุน้ำหนักก่อนบันทึก' });
       return;
@@ -381,57 +381,62 @@ export default function ScrapPurchase() {
       payMethod,
       note: note.trim(),
     });
-    addReceipt({
-      no: receiptNo,
-      time: timeStr,
-      cust: cust.name,
-      // Receipts previously only stored the customer's name — voiding one had no reliable
-      // way to find which customer record to reverse recordPurchase's effect on. Kept
-      // alongside `cust` (the display name) rather than replacing it. Walk-in sales
-      // legitimately have no id — that's fine, there's no customer ledger to reverse.
-      custId: selectedCustomer?.id || null,
-      // The Receipts.jsx preview panel used to just hardcode "เจ้าของร้าน" here regardless of
-      // who was actually logged in — persist the real issuer name onto the receipt itself,
-      // same fallback as the print snapshot below.
-      issuedBy: user?.displayName || 'เจ้าของร้าน',
-      init: cust.init || initials(cust.name),
-      bg: cust.bg || 'var(--green-100)',
-      fg: cust.fg || 'var(--green-700)',
-      status: 'ok',
-      weight: totalWeight.toFixed(2) + ' กก.',
-      deductionWeight: totalDeductionWeight,
-      deductionLabel,
-      note: note.trim(),
-      method: PAY_LABELS[payMethod],
-      items: rows.map((r) => ({
-        n: r.name,
-        w:
-          rowDeductionWeight(r) > 0
-            ? `${rowWeight(r).toFixed(2)} − ${rowDeductionWeight(r).toFixed(2)} = ${rowNetWeight(r).toFixed(2)} กก. × ${money(rowPrice(r))}`
-            : `${rowWeight(r).toFixed(2)} กก. × ${money(rowPrice(r))}`,
-        // Kept as a real number alongside the display string `w` above — voiding a receipt
-        // needs the exact net weight added to stock per product, and parsing it back out of
-        // the formatted string would be fragile.
-        netWeight: rowNetWeight(r),
-        t: money(rowNetTotal(r)),
-        // Snapshot the product's category at purchase time — Categories.jsx sums revenue per
-        // category from receipt history, and deriving the category from the live product list
-        // instead would make a product's entire purchase history vanish from its category's
-        // stats the moment that product gets deleted, even though nothing about the past
-        // receipts changed.
-        cat: Object.values(products).find((p) => p.name === r.name)?.cat || null,
-      })),
-      total: money(grandTotal),
-      // Which deduction reasons this receipt actually incremented usage on, and by how much —
-      // voiding the receipt needs this to call decrementUsage the same number of times with
-      // the same amounts, or the reason's "ใช้แล้ว N ครั้ง"/ยอดหักรวม would stay inflated forever.
-      deductionUsage: [
-        ...(deductionReasonId && overallDeductionWeight > 0 ? [{ id: deductionReasonId, amount: overallDeductionMoney }] : []),
-        ...rows
-          .filter((r) => r.deductionReasonId && rowDeductionWeight(r) > 0)
-          .map((r) => ({ id: r.deductionReasonId, amount: rowDeductionMoney(r) })),
-      ],
-    });
+    try {
+      await addReceipt({
+        no: receiptNo,
+        time: timeStr,
+        cust: cust.name,
+        // Receipts previously only stored the customer's name — voiding one had no reliable
+        // way to find which customer record to reverse recordPurchase's effect on. Kept
+        // alongside `cust` (the display name) rather than replacing it. Walk-in sales
+        // legitimately have no id — that's fine, there's no customer ledger to reverse.
+        custId: selectedCustomer?.id || null,
+        // The Receipts.jsx preview panel used to just hardcode "เจ้าของร้าน" here regardless of
+        // who was actually logged in — persist the real issuer name onto the receipt itself,
+        // same fallback as the print snapshot below.
+        issuedBy: user?.displayName || 'เจ้าของร้าน',
+        init: cust.init || initials(cust.name),
+        bg: cust.bg || 'var(--green-100)',
+        fg: cust.fg || 'var(--green-700)',
+        status: 'ok',
+        weight: totalWeight.toFixed(2) + ' กก.',
+        deductionWeight: totalDeductionWeight,
+        deductionLabel,
+        note: note.trim(),
+        method: PAY_LABELS[payMethod],
+        items: rows.map((r) => ({
+          n: r.name,
+          w:
+            rowDeductionWeight(r) > 0
+              ? `${rowWeight(r).toFixed(2)} − ${rowDeductionWeight(r).toFixed(2)} = ${rowNetWeight(r).toFixed(2)} กก. × ${money(rowPrice(r))}`
+              : `${rowWeight(r).toFixed(2)} กก. × ${money(rowPrice(r))}`,
+          // Kept as a real number alongside the display string `w` above — voiding a receipt
+          // needs the exact net weight added to stock per product, and parsing it back out of
+          // the formatted string would be fragile.
+          netWeight: rowNetWeight(r),
+          t: money(rowNetTotal(r)),
+          // Snapshot the product's category at purchase time — Categories.jsx sums revenue per
+          // category from receipt history, and deriving the category from the live product list
+          // instead would make a product's entire purchase history vanish from its category's
+          // stats the moment that product gets deleted, even though nothing about the past
+          // receipts changed.
+          cat: Object.values(products).find((p) => p.name === r.name)?.cat || null,
+        })),
+        total: money(grandTotal),
+        // Which deduction reasons this receipt actually incremented usage on, and by how much —
+        // voiding the receipt needs this to call decrementUsage the same number of times with
+        // the same amounts, or the reason's "ใช้แล้ว N ครั้ง"/ยอดหักรวม would stay inflated forever.
+        deductionUsage: [
+          ...(deductionReasonId && overallDeductionWeight > 0 ? [{ id: deductionReasonId, amount: overallDeductionMoney }] : []),
+          ...rows
+            .filter((r) => r.deductionReasonId && rowDeductionWeight(r) > 0)
+            .map((r) => ({ id: r.deductionReasonId, amount: rowDeductionMoney(r) })),
+        ],
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     // Record real usage against each deduction reason actually applied on this receipt —
     // both the overall reason and any per-row reasons — so the "ใช้แล้ว N ครั้ง" / total
     // figures on the หักน้ำหนัก/เหตุผล page reflect real activity, not frozen seed numbers.
