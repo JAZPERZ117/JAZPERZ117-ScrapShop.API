@@ -140,4 +140,57 @@ db.exec(`
   );
 `);
 
+// Staff roster + weekly attendance/pay state used to live only in each browser's own
+// localStorage. Note: per-keystroke fields (advance, other amount/reason, and attendance
+// clicks) are deliberately NOT written to the server as they happen — the frontend keeps
+// those as a local draft and only calls PUT /api/staff/:id once, when the user explicitly
+// clicks "บันทึกร่าง"/"จ่ายเงิน", matching how every other edit form in this app already
+// works (Customers/Products/Users), instead of firing a network request per keystroke.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS staff (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT '',
+    init TEXT NOT NULL DEFAULT '',
+    bg TEXT NOT NULL DEFAULT '',
+    fg TEXT NOT NULL DEFAULT '',
+    base REAL NOT NULL DEFAULT 0,
+    days REAL NOT NULL DEFAULT 0,
+    max_days INTEGER NOT NULL DEFAULT 6,
+    attendance TEXT NOT NULL DEFAULT '["off","off","off","off","off","off"]',
+    advance REAL NOT NULL DEFAULT 0,
+    other_amount REAL NOT NULL DEFAULT 0,
+    other_reason_id TEXT NOT NULL DEFAULT '',
+    other_custom_reason TEXT NOT NULL DEFAULT '',
+    paid INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// Every finalized weekly payment, appended once per POST /api/staff/:id/pay — `no` (the
+// payment voucher number, e.g. "PV123456789") is the real primary key, same convention as
+// receipts/deliveries.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pay_history (
+    no TEXT PRIMARY KEY,
+    time TEXT NOT NULL DEFAULT '',
+    paid_at TEXT NOT NULL DEFAULT '',
+    week_key TEXT NOT NULL DEFAULT '',
+    week_label TEXT NOT NULL DEFAULT '',
+    staff_id TEXT NOT NULL DEFAULT '',
+    staff_name TEXT NOT NULL DEFAULT '',
+    staff_role TEXT NOT NULL DEFAULT '',
+    days REAL NOT NULL DEFAULT 0,
+    max_days INTEGER NOT NULL DEFAULT 6,
+    attendance TEXT NOT NULL DEFAULT '[]',
+    base REAL NOT NULL DEFAULT 0,
+    advance REAL NOT NULL DEFAULT 0,
+    other_amount REAL NOT NULL DEFAULT 0,
+    other_label TEXT NOT NULL DEFAULT '',
+    net REAL NOT NULL DEFAULT 0,
+    pay_method TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;

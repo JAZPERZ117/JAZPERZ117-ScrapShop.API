@@ -750,6 +750,153 @@ app.delete('/api/deliveries/:no', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+function toApiStaff(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    role: row.role,
+    init: row.init,
+    bg: row.bg,
+    fg: row.fg,
+    base: row.base,
+    days: row.days,
+    maxDays: row.max_days,
+    attendance: JSON.parse(row.attendance || '[]'),
+    advance: row.advance,
+    otherAmount: row.other_amount,
+    otherReasonId: row.other_reason_id,
+    otherCustomReason: row.other_custom_reason,
+    paid: !!row.paid,
+  };
+}
+
+function toApiPayRecord(row) {
+  return {
+    no: row.no,
+    time: row.time,
+    paidAt: row.paid_at,
+    weekKey: row.week_key,
+    weekLabel: row.week_label,
+    staffId: row.staff_id,
+    staffName: row.staff_name,
+    staffRole: row.staff_role,
+    days: row.days,
+    maxDays: row.max_days,
+    attendance: JSON.parse(row.attendance || '[]'),
+    base: row.base,
+    advance: row.advance,
+    otherAmount: row.other_amount,
+    otherLabel: row.other_label,
+    net: row.net,
+    payMethod: row.pay_method,
+  };
+}
+
+// Staff roster + weekly attendance/pay state used to live only in each browser's own
+// localStorage. Per-keystroke fields (advance, other amount/reason, attendance) are meant to
+// be pushed here only once, when the frontend's local draft is explicitly saved/paid — not on
+// every keystroke — see db.js's note on the `staff` table for why.
+app.get('/api/staff', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM staff ORDER BY created_at DESC, rowid DESC').all();
+  res.json({ staff: rows.map(toApiStaff) });
+});
+
+app.post('/api/staff', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อพนักงาน' });
+  const id = `staff_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  db.prepare(
+    'INSERT INTO staff (id, name, role, init, bg, fg, base) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, b.name.trim(), b.role || '', b.init || '', b.bg || 'var(--green-100)', b.fg || 'var(--green-700)', b.base || 0);
+  const row = db.prepare('SELECT * FROM staff WHERE id = ?').get(id);
+  res.status(201).json({ staff: toApiStaff(row) });
+});
+
+// General patch — covers both the profile edit (name/role/base) and the draft save
+// (days/attendance/advance/otherAmount/otherReasonId/otherCustomReason/paid), and the
+// one-click "จ่ายแล้ว"/"ค้างจ่าย" badge toggle (paid only). Whichever fields the caller
+// sends are the ones that change; everything else on the row is left alone.
+app.put('/api/staff/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบข้อมูลพนักงาน' });
+  const b = req.body || {};
+  db.prepare(
+    `UPDATE staff SET name = ?, role = ?, base = ?, days = ?, max_days = ?, attendance = ?, advance = ?, other_amount = ?, other_reason_id = ?, other_custom_reason = ?, paid = ? WHERE id = ?`
+  ).run(
+    b.name !== undefined ? b.name.trim() || row.name : row.name,
+    b.role !== undefined ? b.role : row.role,
+    b.base !== undefined ? b.base : row.base,
+    b.days !== undefined ? b.days : row.days,
+    b.maxDays !== undefined ? b.maxDays : row.max_days,
+    b.attendance !== undefined ? JSON.stringify(b.attendance) : row.attendance,
+    b.advance !== undefined ? b.advance : row.advance,
+    b.otherAmount !== undefined ? b.otherAmount : row.other_amount,
+    b.otherReasonId !== undefined ? b.otherReasonId : row.other_reason_id,
+    b.otherCustomReason !== undefined ? b.otherCustomReason : row.other_custom_reason,
+    b.paid !== undefined ? (b.paid ? 1 : 0) : row.paid,
+    row.id
+  );
+  res.json({ staff: toApiStaff(db.prepare('SELECT * FROM staff WHERE id = ?').get(row.id)) });
+});
+
+app.delete('/api/staff/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบข้อมูลพนักงาน' });
+  db.prepare('DELETE FROM staff WHERE id = ?').run(row.id);
+  res.json({ ok: true });
+});
+
+// Finalizes a weekly payment: records the pay_history entry (client computes `net` from the
+// same dailyRate formula PayrollReport.jsx also uses, and supplies the voucher number/week
+// key/label — these are just labels, not values another device could race on) and resets the
+// staff row's week-local fields in one call, so a client can't save the history entry but
+// fail to reset the roster row (or vice versa) from a single dropped request.
+app.post('/api/staff/:id/pay', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบข้อมูลพนักงาน' });
+  const b = req.body || {};
+  if (!b.no) return res.status(400).json({ error: 'ไม่มีเลขที่ใบสำคัญจ่าย' });
+  if (db.prepare('SELECT no FROM pay_history WHERE no = ?').get(b.no)) {
+    return res.status(409).json({ error: `เลขที่ใบสำคัญจ่าย ${b.no} ถูกใช้แล้ว` });
+  }
+  db.prepare(
+    `INSERT INTO pay_history (no, time, paid_at, week_key, week_label, staff_id, staff_name, staff_role, days, max_days, attendance, base, advance, other_amount, other_label, net, pay_method)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    b.no,
+    b.time || '',
+    b.paidAt || new Date().toISOString(),
+    b.weekKey || '',
+    b.weekLabel || '',
+    row.id,
+    row.name,
+    row.role,
+    b.days ?? row.days,
+    b.maxDays ?? row.max_days,
+    JSON.stringify(b.attendance || []),
+    b.base ?? row.base,
+    b.advance ?? row.advance,
+    b.otherAmount ?? row.other_amount,
+    b.otherLabel || '',
+    b.net || 0,
+    b.payMethod || ''
+  );
+  // Pay period is weekly: the payment's now on record, so reset attendance/advances/other and
+  // mark paid so the next week starts fresh.
+  db.prepare(
+    `UPDATE staff SET days = 0, attendance = '["off","off","off","off","off","off"]', advance = 0, other_amount = 0, other_reason_id = '', other_custom_reason = '', paid = 1 WHERE id = ?`
+  ).run(row.id);
+  res.status(201).json({
+    payRecord: toApiPayRecord(db.prepare('SELECT * FROM pay_history WHERE no = ?').get(b.no)),
+    staff: toApiStaff(db.prepare('SELECT * FROM staff WHERE id = ?').get(row.id)),
+  });
+});
+
+app.get('/api/pay-history', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM pay_history ORDER BY created_at DESC, rowid DESC').all();
+  res.json({ payHistory: rows.map(toApiPayRecord) });
+});
+
 // React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
 // has to still get index.html from the server (there's no real /receipts file on disk) and let
 // the client-side router take over from there. Registered after every real route above, so it

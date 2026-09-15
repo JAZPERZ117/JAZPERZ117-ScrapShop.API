@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect } from 'react';
-import { usePersistentState } from '../lib/persist.js';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { getToken } from '../lib/auth.js';
 
 const MAX_DAYS_PER_WEEK = 6;
 
@@ -36,66 +36,114 @@ export function attendanceFromDays(days) {
   return attendance;
 }
 
-// A real deployment keeps the staff roster as a starting point (renamed/edited later by the
-// shop), but starts each person with a fresh, unworked week — no attendance, advances, or
-// payments recorded yet.
-export const INITIAL_STAFF = {
-  wittaya: { name: 'นายวิทยา ทองสุข', role: 'พนักงานชั่งของ', init: 'วิ', bg: 'var(--blue-bg)', fg: 'var(--blue)', base: 12000, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
-  somsak: { name: 'นายสมศักดิ์ แก้วมณี', role: 'คนขับรถรับซื้อ', init: 'สม', bg: 'var(--rose-bg)', fg: 'var(--rose)', base: 13500, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
-  kanjana: { name: 'น.ส.กาญจนา ศรีสุข', role: 'แคชเชียร์', init: 'กา', bg: 'var(--plum-bg)', fg: 'var(--plum)', base: 10500, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
-  prasert: { name: 'นายประเสริฐ แสงทอง', role: 'พนักงานคัดแยก', init: 'ปร', bg: 'var(--amber-bg)', fg: 'var(--amber)', base: 9800, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
-  malee: { name: 'นางมาลี วงศ์ไทย', role: 'พนักงานชั่งของ', init: 'มา', bg: 'var(--green-100)', fg: 'var(--green-700)', base: 12000, days: 0, maxDays: 6, attendance: ['off', 'off', 'off', 'off', 'off', 'off'], advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
-};
-
-export const INITIAL_ORDER = ['wittaya', 'somsak', 'kanjana', 'prasert', 'malee'];
+function authHeaders() {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` };
+}
 
 const PayrollContext = createContext(null);
 
 export function PayrollProvider({ children }) {
-  const [staff, setStaff] = usePersistentState('scrapshop_payroll_staff', INITIAL_STAFF);
-  const [order, setOrder] = usePersistentState('scrapshop_payroll_order', INITIAL_ORDER);
-  // Every finalized weekly payment is appended here so past weeks can be reviewed later —
-  // unlike component-local state, this survives reloads because it's written to localStorage.
-  const [payHistory, setPayHistory] = usePersistentState('scrapshop_payroll_history', []);
+  const [staff, setStaff] = useState({});
+  const [order, setOrder] = useState([]);
+  const [payHistory, setPayHistory] = useState([]);
 
-  function addPayHistory(record) {
-    setPayHistory((prev) => [record, ...prev]);
-  }
-
-  // One-time migration: payroll used to run on a ~26-day monthly cycle; it now runs
-  // weekly (Mon-Sat, max 6 days). Also, "เบิกล่วงหน้า" (cash advance, subtracted from pay)
-  // and "อื่นๆ" (allowances like ค่าเช่าบ้าน/ค่าน้ำมันรถ, added to pay) used to share one
-  // combined "deduct" field; they're now separate fields with opposite signs. Anything
-  // saved under either old shape gets normalized here so people don't have to clear
-  // their browser storage.
-  useEffect(() => {
-    setStaff((prev) => {
-      let changed = false;
-      const next = {};
-      for (const id in prev) {
-        let p = prev[id];
-        if ((p.maxDays || 0) > MAX_DAYS_PER_WEEK) {
-          changed = true;
-          p = { ...p, maxDays: MAX_DAYS_PER_WEEK, days: Math.min(p.days || 0, MAX_DAYS_PER_WEEK) };
+  // Staff roster + weekly attendance/pay state used to live only in this browser's own
+  // localStorage. Fetched from the real database behind requireAuth, same as
+  // users/customers/products/receipts/deliveries. Per-keystroke fields (advance, other
+  // amount/reason, attendance clicks) are NOT pushed to the server as they happen — Payroll.jsx
+  // keeps those as a local draft and only calls updateStaff once, on an explicit
+  // "บันทึกร่าง"/"จ่ายเงิน" action, matching every other edit form in this app.
+  const refresh = useCallback(async () => {
+    try {
+      const [staffRes, historyRes] = await Promise.all([
+        fetch('/api/staff', { headers: authHeaders() }),
+        fetch('/api/pay-history', { headers: authHeaders() }),
+      ]);
+      if (staffRes.ok) {
+        const data = await staffRes.json();
+        const map = {};
+        const ord = [];
+        for (const s of data.staff) {
+          map[s.id] = s;
+          ord.push(s.id);
         }
-        if (p.advance === undefined) {
-          changed = true;
-          const { deduct, deductReasonId, deductCustomReason, ...rest } = p;
-          p = { ...rest, advance: deduct || 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '' };
-        }
-        if (!Array.isArray(p.attendance)) {
-          changed = true;
-          p = { ...p, attendance: attendanceFromDays(p.days) };
-        }
-        next[id] = p;
+        setStaff(map);
+        setOrder(ord);
       }
-      return changed ? next : prev;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      if (historyRes.ok) {
+        const data = await historyRes.json();
+        setPayHistory(data.payHistory);
+      }
+    } catch {
+      // Offline or server down — leave whatever's already loaded rather than clearing it.
+    }
   }, []);
 
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  async function createStaff(data) {
+    const res = await fetch('/api/staff', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'เพิ่มลูกน้องไม่สำเร็จ');
+    setStaff((prev) => ({ ...prev, [result.staff.id]: result.staff }));
+    setOrder((prev) => [result.staff.id, ...prev]);
+    return result.staff;
+  }
+
+  // General patch — covers the profile edit (name/role/base), the draft save
+  // (days/attendance/advance/otherAmount/otherReasonId/otherCustomReason/paid), and the
+  // one-click "จ่ายแล้ว"/"ค้างจ่าย" badge toggle (paid only).
+  async function updateStaff(id, patch) {
+    const res = await fetch(`/api/staff/${id}`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify(patch),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'บันทึกข้อมูลพนักงานไม่สำเร็จ');
+    setStaff((prev) => ({ ...prev, [id]: data.staff }));
+    return data.staff;
+  }
+
+  async function deleteStaff(id) {
+    const res = await fetch(`/api/staff/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'ลบข้อมูลพนักงานไม่สำเร็จ');
+    }
+    setStaff((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setOrder((prev) => prev.filter((oid) => oid !== id));
+  }
+
+  // Finalizes a weekly payment — records the pay_history entry and resets the staff row's
+  // week-local fields (days/attendance/advance/other, paid=true) in one atomic server call.
+  async function payStaff(id, data) {
+    const res = await fetch(`/api/staff/${id}/pay`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(data),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'บันทึกการจ่ายเงินไม่สำเร็จ');
+    setStaff((prev) => ({ ...prev, [id]: result.staff }));
+    setPayHistory((prev) => [result.payRecord, ...prev]);
+    return result;
+  }
+
   return (
-    <PayrollContext.Provider value={{ staff, setStaff, order, setOrder, payHistory, addPayHistory }}>
+    <PayrollContext.Provider
+      value={{ staff, order, payHistory, createStaff, updateStaff, deleteStaff, payStaff, refresh }}
+    >
       {children}
     </PayrollContext.Provider>
   );
