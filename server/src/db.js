@@ -193,4 +193,24 @@ db.exec(`
   );
 `);
 
+// Deduction reasons (น้ำหนักเปียก, สิ่งปนเปื้อน, ฯลฯ) used to live only in each browser's own
+// localStorage — the usage counters (uses/total) specifically need to be the same number
+// everywhere, since a reason applied to a purchase on any device should count toward the same
+// running total every other device sees.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS deduction_reasons (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    desc TEXT NOT NULL DEFAULT '',
+    bg TEXT NOT NULL DEFAULT 'var(--green-100)',
+    fg TEXT NOT NULL DEFAULT 'var(--green-700)',
+    type TEXT NOT NULL DEFAULT 'fixed',
+    value TEXT NOT NULL DEFAULT '0',
+    uses INTEGER NOT NULL DEFAULT 0,
+    total REAL NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;

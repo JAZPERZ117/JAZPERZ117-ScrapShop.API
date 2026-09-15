@@ -75,3 +75,22 @@ for (const s of INITIAL_STAFF) {
   ).run(s.id, s.name, s.role, s.init, s.bg, s.fg, s.base);
   console.log(`สร้างพนักงานตั้งต้นสำเร็จ: ${s.name}`);
 }
+
+// Starting deduction reasons (see src/context/DeductionsContext.jsx's old INITIAL_REASONS).
+const INITIAL_REASONS = [
+  { id: 'wet', name: 'น้ำหนักเปียก', desc: 'สินค้าเปียกน้ำหรือมีความชื้นสูงกว่าปกติ', bg: 'var(--blue-bg)', fg: 'var(--blue)', type: 'percent', value: '5', active: 1 },
+  { id: 'dirty', name: 'มีสิ่งปนเปื้อน', desc: 'มีดิน ทราย หรือสิ่งแปลกปลอมปนเปื้อน', bg: 'var(--amber-bg)', fg: 'var(--amber)', type: 'percent', value: '8', active: 1 },
+  { id: 'package', name: 'หักน้ำหนักบรรจุภัณฑ์', desc: 'หักน้ำหนักถุง กล่อง หรือภาชนะที่ปนมา', bg: 'var(--plum-bg)', fg: 'var(--plum)', type: 'fixed', value: '1.5', active: 1 },
+  { id: 'rusty', name: 'เหล็กเป็นสนิมมาก', desc: 'คุณภาพต่ำกว่ามาตรฐานรับซื้อปกติ', bg: 'var(--rose-bg)', fg: 'var(--rose)', type: 'percent', value: '10', active: 1 },
+  { id: 'scale', name: 'ปรับตามเครื่องชั่ง', desc: 'ส่วนต่างจากการสอบเทียบเครื่องชั่ง', bg: 'var(--teal-bg, #E4F6F4)', fg: 'var(--teal, #0E8E82)', type: 'fixed', value: '20', active: 1 },
+  { id: 'broken', name: 'แก้วแตกร้าว', desc: 'ขวดแก้วแตกหรือชำรุดเกินมาตรฐาน', bg: 'var(--bg)', fg: 'var(--ink-500)', type: 'percent', value: '15', active: 0 },
+  { id: 'other', name: 'อื่นๆ (ระบุเอง)', desc: 'พิมพ์เหตุผลเพิ่มเติมได้เองในหน้ารับซื้อของ', bg: 'var(--green-100)', fg: 'var(--green-700)', type: 'fixed', value: '0', active: 1 },
+];
+for (const r of INITIAL_REASONS) {
+  const already = db.prepare('SELECT id FROM deduction_reasons WHERE id = ?').get(r.id);
+  if (already) continue;
+  db.prepare(
+    'INSERT INTO deduction_reasons (id, name, desc, bg, fg, type, value, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(r.id, r.name, r.desc, r.bg, r.fg, r.type, r.value, r.active);
+  console.log(`สร้างเหตุผลหักน้ำหนักตั้งต้นสำเร็จ: ${r.name}`);
+}

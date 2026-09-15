@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { exportCsv } from '../lib/csvExport.js';
-import { useDeductions, BLANK_REASON } from '../context/DeductionsContext.jsx';
+import { useDeductions } from '../context/DeductionsContext.jsx';
 import { IconDeduct, IconDownload, IconPlus, IconCheck, IconEdit, IconClockHistory, IconX, IconTrash } from '../icons.jsx';
 import RowMenu from '../components/RowMenu.jsx';
 import './Deductions.css';
@@ -10,7 +10,7 @@ function money(n) {
 }
 
 export default function Deductions() {
-  const { reasons, setReasons, order, setOrder } = useDeductions();
+  const { reasons, order, createReason, updateReason, deleteReason } = useDeductions();
   const totalUsesThisMonth = order.reduce((sum, id) => sum + (reasons[id].uses || 0), 0);
   const totalDeductedThisMonth = order.reduce((sum, id) => sum + (reasons[id].total || 0), 0);
   const mostUsedId = order.reduce((best, id) => (!best || reasons[id].uses > reasons[best].uses ? id : best), null);
@@ -42,7 +42,18 @@ export default function Deductions() {
     [filter, query, reasons, order]
   );
 
+  // Reasons now load asynchronously from the server (see DeductionsContext.jsx), so `order`
+  // is still empty on the very first render — select the first real reason once data actually
+  // loads, same fix already applied to Receipts/Products/Customers/Payroll.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) select(order[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, selectedId]);
+
   const r = reasons[selectedId];
+  // `reasons[selectedId]` can briefly be missing while data loads — bail out rather than
+  // rendering a detail panel built from `undefined` (r.name, r.type, etc.).
+  if (!r) return null;
 
   function select(id) {
     setSelectedId(id);
@@ -52,8 +63,12 @@ export default function Deductions() {
     setEditValue(reasons[id].value);
   }
 
-  function toggleActive() {
-    setReasons((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], active: !prev[selectedId].active } }));
+  async function toggleActive() {
+    try {
+      await updateReason(selectedId, { active: !r.active });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
   function handleExport() {
@@ -67,48 +82,53 @@ export default function Deductions() {
     );
   }
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
     if (!newName.trim()) return;
-    const id = `new_${Date.now()}`;
-    const created = { ...BLANK_REASON, name: newName.trim(), desc: newDesc.trim() };
-    setReasons((prev) => ({ ...prev, [id]: created }));
-    setOrder((prev) => [id, ...prev]);
-    setSelectedId(id);
-    setType(created.type);
-    setEditName(created.name);
-    setEditDesc(created.desc);
-    setEditValue(created.value);
-    setNewName('');
-    setNewDesc('');
-    setShowNew(false);
-    setBanner({ type: 'success', text: `เพิ่มเหตุผล ${newName.trim()} เรียบร้อยแล้ว` });
+    try {
+      const created = await createReason({ name: newName.trim(), desc: newDesc.trim() });
+      setSelectedId(created.id);
+      setType(created.type);
+      setEditName(created.name);
+      setEditDesc(created.desc);
+      setEditValue(created.value);
+      setNewName('');
+      setNewDesc('');
+      setShowNew(false);
+      setBanner({ type: 'success', text: `เพิ่มเหตุผล ${newName.trim()} เรียบร้อยแล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
-  function handleSave() {
+  async function handleSave() {
     // The value input has min="0" but that only hints the browser's spinner — it doesn't
     // block typing/pasting a negative number, which would otherwise render as a doubled
     // minus sign ("−-5%") in the table below.
     const clampedValue = Math.max(parseFloat(editValue) || 0, 0);
-    setReasons((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], name: editName.trim() || prev[selectedId].name, desc: editDesc, value: clampedValue, type } }));
-    setEditValue(clampedValue);
-    setBanner({ type: 'success', text: `บันทึกการเปลี่ยนแปลงของ "${editName.trim() || r.name}" แล้ว` });
+    try {
+      await updateReason(selectedId, { name: editName.trim() || r.name, desc: editDesc, value: clampedValue, type });
+      setEditValue(clampedValue);
+      setBanner({ type: 'success', text: `บันทึกการเปลี่ยนแปลงของ "${editName.trim() || r.name}" แล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
-  function handleDelete(id = selectedId) {
+  async function handleDelete(id = selectedId) {
     if (order.length <= 1) {
       setBanner({ type: 'error', text: 'ต้องมีเหตุผลอย่างน้อย 1 รายการ ไม่สามารถลบรายการสุดท้ายได้' });
       return;
     }
     const target = reasons[id];
     if (!window.confirm(`ยืนยันลบเหตุผล "${target.name}"?`)) return;
+    try {
+      await deleteReason(id);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     const remaining = order.filter((oid) => oid !== id);
-    setOrder(remaining);
-    setReasons((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
     if (id === selectedId && remaining[0]) select(remaining[0]);
     setBanner({ type: 'error', text: `ลบเหตุผล "${target.name}" แล้ว` });
   }
