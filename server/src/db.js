@@ -61,4 +61,29 @@ db.exec(`
   );
 `);
 
+// Products (the scrap-material catalog, prices, and on-hand stock) used to live only in each
+// browser's own localStorage — the same "each device has its own copy" problem customers had,
+// except worse here since stock levels genuinely need to be the same number everywhere: a
+// device that ships out stock via a delivery, or buys more via a purchase, must update the one
+// real number every other device reads, not a private copy that immediately goes stale.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    cat TEXT NOT NULL DEFAULT 'อื่นๆ',
+    icon_key TEXT NOT NULL DEFAULT 'box',
+    bg TEXT NOT NULL DEFAULT 'var(--bg)',
+    fg TEXT NOT NULL DEFAULT 'var(--ink-500)',
+    price REAL NOT NULL DEFAULT 0,
+    change TEXT NOT NULL DEFAULT '0.0%',
+    dir TEXT NOT NULL DEFAULT 'flat',
+    stock TEXT NOT NULL DEFAULT '0.00 กก.',
+    stock_pct REAL NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1,
+    spark TEXT NOT NULL DEFAULT '[]',
+    hist TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;
