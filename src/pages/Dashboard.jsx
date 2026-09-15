@@ -90,7 +90,9 @@ export default function Dashboard() {
   );
   const newCustomerIds = customerOrder.filter((id) => !CUSTOMERS_INITIAL_ORDER.includes(id));
 
-  const recentReceipts = receiptOrder.slice(0, 4).map((id) => receipts[id]);
+  // Voided receipts are excluded everywhere else on this page — keep "recent" consistent
+  // instead of showing a voided sale's full total as if it were a normal one.
+  const recentReceipts = activeReceipts.slice(0, 4).map((id) => receipts[id]);
 
   const topProducts = useMemo(() => {
     const byName = {};

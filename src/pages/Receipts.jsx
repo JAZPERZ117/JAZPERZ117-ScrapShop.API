@@ -77,8 +77,8 @@ export default function Receipts() {
   const navigate = useNavigate();
   const { receipts, setReceipts, order } = useReceipts();
   const { settings } = useSettings();
-  const { reversePurchase } = useCustomers();
-  const { removeStockByName } = useProducts();
+  const { reversePurchase, recordPurchase } = useCustomers();
+  const { removeStockByName, addStock } = useProducts();
   const { decrementUsage } = useDeductions();
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
@@ -87,6 +87,11 @@ export default function Receipts() {
   const [banner, setBanner] = useState(null);
   const [activity, setActivity] = usePersistentState('scrapshop_receipts_activity', []);
   const [printedIds, setPrintedIds] = usePersistentState('scrapshop_receipts_printed_ids', []);
+  // Separate, timestamped log for the "พิมพ์ซ้ำเดือนนี้" stat — `activity` below is a generic
+  // feed capped at 10 entries across every action type (voids, edits, prints), so reusing it
+  // for a monthly print count would silently undercount once 10 actions of any kind pile up,
+  // and never actually filtered by month to begin with.
+  const [printLog, setPrintLog] = usePersistentState('scrapshop_receipts_print_log', []);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState(null);
 
@@ -137,7 +142,13 @@ export default function Receipts() {
   }, [order, receipts]);
   const monthCount = monthActiveOrder.length;
   const monthTotal = monthActiveOrder.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
-  const reprintCount = activity.filter((a) => a.text.startsWith('พิมพ์ซ้ำ') || a.text.startsWith('ดาวน์โหลด')).length;
+  const reprintCount = useMemo(() => {
+    const now = new Date();
+    return printLog.filter((iso) => {
+      const d = new Date(iso);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }).length;
+  }, [printLog]);
   const reprintFromCount = printedIds.length;
   const voidTotal = useMemo(
     () => monthVoidedIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
@@ -180,6 +191,7 @@ export default function Receipts() {
 
   function handlePrint() {
     setPrintedIds((prev) => (prev.includes(selectedId) ? prev : [...prev, selectedId]));
+    setPrintLog((prev) => [...prev, new Date().toISOString()]);
     logActivity(`พิมพ์ซ้ำ ${selected.no}`);
     setBanner({ type: 'success', text: `ส่งพิมพ์ใบเสร็จ ${selected.no} ไปยังเครื่องพิมพ์แล้ว` });
     window.print();
@@ -187,6 +199,7 @@ export default function Receipts() {
 
   function handleDownloadPdf() {
     setPrintedIds((prev) => (prev.includes(selectedId) ? prev : [...prev, selectedId]));
+    setPrintLog((prev) => [...prev, new Date().toISOString()]);
     logActivity(`ดาวน์โหลด PDF ${selected.no}`);
     setBanner({ type: 'success', text: `เปิดหน้าต่างพิมพ์ใบเสร็จ ${selected.no} แล้ว — เลือก "บันทึกเป็น PDF" เพื่อดาวน์โหลด` });
     window.print();
@@ -286,8 +299,28 @@ export default function Receipts() {
     const newItems = validItems.map((it) => {
       const w = parseFloat(it.weight) || 0;
       const p = parseFloat(it.price) || 0;
-      return { n: it.name.trim(), w: `${w.toFixed(2)} กก. × ${money(p)}`, t: money(w * p) };
+      // Keep the real net weight as a number alongside the display string, same as a receipt
+      // created fresh in ScrapPurchase.jsx — otherwise a later void on this edited receipt
+      // would have to fall back to regex-parsing the weight back out of the display string.
+      return { n: it.name.trim(), w: `${w.toFixed(2)} กก. × ${money(p)}`, netWeight: w, t: money(w * p) };
     });
+    // Editing a receipt's items/weights must keep stock and the customer's lifetime totals in
+    // sync — reverse exactly what the original items/total added, then apply the edited ones,
+    // the same inverse-then-reapply shape handleVoid already uses for a full cancellation.
+    // Without this, stock and customer figures stay frozen at the pre-edit numbers, silently
+    // diverging from what the (now-edited) receipt says. Deduction usage isn't touched here:
+    // the edit form doesn't track which deduction reason id was originally applied, so there's
+    // no reliable way to recompute it — it's left exactly as the original receipt recorded it.
+    for (const it of original.items || []) {
+      removeStockByName(it.n, parseItemNetWeight(it));
+    }
+    for (const it of validItems) {
+      addStock(it.name.trim(), parseFloat(it.weight) || 0, parseFloat(it.price) || 0);
+    }
+    if (original.custId) {
+      reversePurchase(original.custId, { weightKg: parseWeightKg(original.weight), amount: parseMoney(original.total), receiptNo: original.no });
+      recordPurchase(original.custId, { weightKg: editTotalWeight, amount: editGrandTotal, receiptNo: original.no, timeStr: nowTimeStr() });
+    }
     setReceipts((prev) => ({
       ...prev,
       [id]: {
@@ -304,7 +337,7 @@ export default function Receipts() {
       },
     }));
     logActivity(`แก้ไขใบเสร็จ ${original.no}`);
-    setBanner({ type: 'success', text: `บันทึกการแก้ไขใบเสร็จ ${original.no} แล้ว` });
+    setBanner({ type: 'success', text: `บันทึกการแก้ไขใบเสร็จ ${original.no} แล้ว — ปรับสต็อกสินค้าและยอดสะสมลูกค้าให้ตรงกับรายการที่แก้ไขแล้ว` });
     setIsEditing(false);
     setEditForm(null);
   }

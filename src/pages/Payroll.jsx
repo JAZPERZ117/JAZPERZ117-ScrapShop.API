@@ -134,7 +134,9 @@ export default function Payroll() {
       const cur = prev[selectedId];
       const attendance = [...(cur.attendance || attendanceFromDays(cur.days))];
       attendance[dayIndex] = CYCLE[(CYCLE.indexOf(attendance[dayIndex] || 'off') + 1) % CYCLE.length];
-      return { ...prev, [selectedId]: { ...cur, attendance, days: attendanceTotal(attendance) } };
+      // Logging attendance for a period that was already marked paid means it's a new,
+      // not-yet-paid week — flip paid back off so the Pay button re-enables for it.
+      return { ...prev, [selectedId]: { ...cur, attendance, days: attendanceTotal(attendance), paid: false } };
     });
   }
 
@@ -246,7 +248,7 @@ export default function Payroll() {
     // Pay period is weekly: record the payment, then reset attendance/advances so the next week starts fresh.
     setStaff((prev) => ({
       ...prev,
-      [selectedId]: { ...prev[selectedId], days: 0, attendance: attendanceFromDays(0), advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: false },
+      [selectedId]: { ...prev[selectedId], days: 0, attendance: attendanceFromDays(0), advance: 0, otherAmount: 0, otherReasonId: '', otherCustomReason: '', paid: true },
     }));
     addPayHistory({
       no: payNo,
