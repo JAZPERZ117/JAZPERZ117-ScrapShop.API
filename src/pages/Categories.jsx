@@ -19,7 +19,7 @@ function money(n) {
 
 export default function Categories() {
   const { categories, setCategoriesRaw, order, setOrder } = useCategories();
-  const { products, setProducts } = useProducts();
+  const { products, reassignCategory } = useProducts();
   const { receipts } = useReceipts();
   const [selectedId, setSelectedId] = useState(order[0]);
   const [swatch, setSwatch] = useState(categories[order[0]]?.color || 'slate');
@@ -113,7 +113,7 @@ export default function Categories() {
     setBanner({ type: 'success', text: `เพิ่มหมวดหมู่ ${newName.trim()} เรียบร้อยแล้ว` });
   }
 
-  function handleSave() {
+  async function handleSave() {
     const nextName = editName.trim() || c.name;
     const prevName = c.name;
     setCategoriesRaw((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], name: nextName, desc: editDesc, color: swatch } }));
@@ -121,24 +121,12 @@ export default function Categories() {
     // this, renaming a category would silently orphan every product already assigned to it:
     // they'd keep the old name string and drop out of this category everywhere it's grouped.
     if (nextName !== prevName) {
-      setProducts((prev) => {
-        let changed = false;
-        const next = {};
-        for (const id in prev) {
-          if (prev[id].cat === prevName) {
-            changed = true;
-            next[id] = { ...prev[id], cat: nextName };
-          } else {
-            next[id] = prev[id];
-          }
-        }
-        return changed ? next : prev;
-      });
+      await reassignCategory(prevName, nextName);
     }
     setBanner({ type: 'success', text: `บันทึกการเปลี่ยนแปลงของหมวดหมู่ "${nextName}" แล้ว` });
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (order.length <= 1) {
       setBanner({ type: 'error', text: 'ต้องมีหมวดหมู่อย่างน้อย 1 รายการ ไม่สามารถลบหมวดหมู่สุดท้ายได้' });
       return;
@@ -151,19 +139,7 @@ export default function Categories() {
     // products (they'd keep pointing at a name that no longer exists in any category). Falls
     // back to "อื่นๆ" if it's still around, otherwise the first remaining category.
     const fallbackName = categories[remaining.find((id) => categories[id].name === 'อื่นๆ')]?.name || categories[remaining[0]]?.name;
-    let movedCount = 0;
-    setProducts((prev) => {
-      const next = {};
-      for (const id in prev) {
-        if (prev[id].cat === deletedName) {
-          movedCount++;
-          next[id] = { ...prev[id], cat: fallbackName };
-        } else {
-          next[id] = prev[id];
-        }
-      }
-      return movedCount ? next : prev;
-    });
+    const movedCount = await reassignCategory(deletedName, fallbackName);
     setOrder(remaining);
     setCategoriesRaw((prev) => {
       const next = { ...prev };

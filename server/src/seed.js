@@ -35,3 +35,24 @@ for (const staff of DEMO_STAFF) {
   ).run(staff.username, '', staff.displayName, staff.role, staff.pin, staff.active);
   console.log(`สร้างผู้ใช้งานตัวอย่างสำเร็จ: ${staff.displayName} (PIN ${staff.pin})`);
 }
+
+// Starting price catalog (see src/context/ProductsContext.jsx's old INITIAL_PRODUCTS_RAW) —
+// a real shop needs these to already exist with zero stock, not an empty product list, since
+// unlike customers there's no "add the first one" flow for the base scrap-material types.
+const INITIAL_PRODUCTS = [
+  { id: 'iron', name: 'เหล็ก', cat: 'โลหะ', iconKey: 'magnet', bg: 'var(--amber-bg)', fg: 'var(--amber)', price: 17.0, active: 1 },
+  { id: 'copper', name: 'ทองแดง', cat: 'โลหะ', iconKey: 'circle', bg: 'var(--rose-bg)', fg: 'var(--rose)', price: 218.0, active: 1 },
+  { id: 'cardboard', name: 'กระดาษลัง', cat: 'กระดาษ', iconKey: 'cardboard', bg: 'var(--blue-bg)', fg: 'var(--blue)', price: 10.0, active: 1 },
+  { id: 'plastic', name: 'ขวดพลาสติก', cat: 'พลาสติก', iconKey: 'bottle', bg: 'var(--plum-bg)', fg: 'var(--plum)', price: 12.4, active: 1 },
+  { id: 'aluminum', name: 'อลูมิเนียม', cat: 'โลหะ', iconKey: 'circle', bg: 'var(--green-100)', fg: 'var(--green-700)', price: 48.0, active: 1 },
+  { id: 'stainless', name: 'สแตนเลส', cat: 'โลหะ', iconKey: 'device', bg: 'var(--teal-bg, #E4F6F4)', fg: 'var(--teal, #0E8E82)', price: 22.5, active: 0 },
+];
+for (const p of INITIAL_PRODUCTS) {
+  const already = db.prepare('SELECT id FROM products WHERE id = ?').get(p.id);
+  if (already) continue;
+  const spark = JSON.stringify([p.price, p.price, p.price, p.price, p.price, p.price, p.price]);
+  db.prepare(
+    'INSERT INTO products (id, name, cat, icon_key, bg, fg, price, active, spark) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(p.id, p.name, p.cat, p.iconKey, p.bg, p.fg, p.price, p.active, spark);
+  console.log(`สร้างสินค้าตั้งต้นสำเร็จ: ${p.name}`);
+}

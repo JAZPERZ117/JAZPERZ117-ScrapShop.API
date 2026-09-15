@@ -144,7 +144,7 @@ export default function Deliveries() {
     resetForm();
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!buyerName.trim()) {
       setBanner({ type: 'error', text: 'กรุณากรอกชื่อผู้รับซื้อปลายทาง' });
       return;
@@ -182,9 +182,7 @@ export default function Deliveries() {
     });
     // Goods physically leave the shop once the delivery is dispatched, so stock drops now —
     // "ยืนยันส่งถึงแล้ว" afterwards only confirms arrival, it doesn't move any more stock.
-    for (const r of validRows) {
-      removeStock(r.productId, rowWeight(r));
-    }
+    await Promise.all(validRows.map((r) => removeStock(r.productId, rowWeight(r))));
     setBanner({ type: 'success', text: `บันทึกใบส่งของ ${no} เรียบร้อยแล้ว น้ำหนักรวม ${totalWeight.toFixed(2)} กก.` });
     setSelectedId(no);
     resetForm();
@@ -267,7 +265,7 @@ export default function Deliveries() {
   const editTotalWeight = isEditing ? editForm.items.reduce((s, r) => s + editRowWeight(r), 0) : 0;
   const editTotalAmount = isEditing ? editForm.items.reduce((s, r) => s + editRowAmount(r), 0) : 0;
 
-  function saveEditDelivery() {
+  async function saveEditDelivery() {
     if (!editForm.buyerName.trim()) {
       setBanner({ type: 'error', text: 'กรุณากรอกชื่อผู้รับซื้อปลายทาง' });
       return;
@@ -296,9 +294,9 @@ export default function Deliveries() {
     let unrestoredWeight = 0;
     for (const it of editForm.originalItems) {
       if (it.productId) {
-        if (!addStockById(it.productId, it.weight)) unrestoredWeight += it.weight;
+        if (!(await addStockById(it.productId, it.weight))) unrestoredWeight += it.weight;
       } else {
-        addStock(it.name, it.weight);
+        await addStock(it.name, it.weight);
       }
     }
     const items = validRows.map((r) => ({
@@ -308,9 +306,7 @@ export default function Deliveries() {
       price: parseFloat(r.price) || 0,
       amount: editRowAmount(r),
     }));
-    for (const r of validRows) {
-      removeStock(r.productId, editRowWeight(r));
-    }
+    await Promise.all(validRows.map((r) => removeStock(r.productId, editRowWeight(r))));
     setDeliveries((prev) => ({
       ...prev,
       [id]: {
@@ -335,7 +331,7 @@ export default function Deliveries() {
     setEditForm(null);
   }
 
-  function handleDeleteDelivery(id = selectedId) {
+  async function handleDeleteDelivery(id = selectedId) {
     const d = deliveries[id];
     if (!d) return;
     if (!window.confirm(`ยืนยันลบใบส่งของ "${d.no}"? ระบบจะคืนน้ำหนักสินค้ากลับเข้าสต็อกให้อัตโนมัติ`)) return;
@@ -345,9 +341,9 @@ export default function Deliveries() {
     let unrestoredWeight = 0;
     for (const it of d.items) {
       if (it.productId) {
-        if (!addStockById(it.productId, it.weight)) unrestoredWeight += it.weight;
+        if (!(await addStockById(it.productId, it.weight))) unrestoredWeight += it.weight;
       } else {
-        addStock(it.name, it.weight);
+        await addStock(it.name, it.weight);
       }
     }
     const remaining = order.filter((oid) => oid !== id);

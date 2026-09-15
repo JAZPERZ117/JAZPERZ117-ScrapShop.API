@@ -369,6 +369,189 @@ app.post('/api/customers/:id/reverse-purchase', requireAuth, (req, res) => {
   res.json({ customer: toApiCustomer(db.prepare('SELECT * FROM customers WHERE id = ?').get(row.id)) });
 });
 
+function toApiProduct(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    cat: row.cat,
+    iconKey: row.icon_key,
+    bg: row.bg,
+    fg: row.fg,
+    price: row.price,
+    change: row.change,
+    dir: row.dir,
+    stock: row.stock,
+    stockPct: row.stock_pct,
+    active: !!row.active,
+    spark: JSON.parse(row.spark || '[]'),
+    hist: JSON.parse(row.hist || '[]'),
+    createdAt: row.created_at,
+  };
+}
+
+function parseStockStr(s) {
+  return parseFloat(String(s).replace(/[^\d.]/g, '')) || 0;
+}
+function formatStock(n) {
+  return `${n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.`;
+}
+function todayThaiShort() {
+  return new Date().toLocaleDateString('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function formatChangePct(pct) {
+  if (pct > 0) return `+${pct.toFixed(1)}%`;
+  if (pct < 0) return `−${Math.abs(pct).toFixed(1)}%`;
+  return '0.0%';
+}
+
+// Products — prices and, critically, on-hand stock — used to live only in each browser's own
+// localStorage. Stock is the sharpest case of why that's broken: a delivery shipping stock out
+// on one device and a purchase adding stock on another must both land on the same real number,
+// not each keep their own private copy that immediately goes stale relative to the other.
+app.get('/api/products', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM products ORDER BY created_at DESC, rowid DESC').all();
+  res.json({ products: rows.map(toApiProduct) });
+});
+
+app.post('/api/products', requireAuth, (req, res) => {
+  const { name, cat, price } = req.body || {};
+  if (!name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อสินค้า' });
+  const id = `prod_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const p = price || 0;
+  const spark = JSON.stringify([p, p, p, p, p, p, p]);
+  db.prepare('INSERT INTO products (id, name, cat, price, spark) VALUES (?, ?, ?, ?, ?)').run(id, name.trim(), cat || 'อื่นๆ', p, spark);
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(id);
+  res.status(201).json({ product: toApiProduct(row) });
+});
+
+// Renaming or deleting a category (see Categories.jsx) cascades onto every product referencing
+// it by name — done as one atomic statement server-side instead of the client reading every
+// product, checking its cat, and writing each one back individually. Registered before
+// PUT /api/products/:id below — Express matches routes in registration order, and :id would
+// otherwise greedily match the literal path segment "reassign-category" as an id.
+app.put('/api/products/reassign-category', requireAuth, (req, res) => {
+  const { fromCat, toCat } = req.body || {};
+  if (!fromCat || !toCat) return res.status(400).json({ error: 'ข้อมูลไม่ถูกต้อง' });
+  const info = db.prepare('UPDATE products SET cat = ? WHERE cat = ?').run(toCat, fromCat);
+  res.json({ movedCount: info.changes });
+});
+
+app.put('/api/products/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
+  const body = req.body || {};
+  db.prepare('UPDATE products SET name = ?, cat = ?, stock = ?, active = ? WHERE id = ?').run(
+    body.name !== undefined ? body.name.trim() || row.name : row.name,
+    body.cat !== undefined ? body.cat : row.cat,
+    body.stock !== undefined ? body.stock : row.stock,
+    body.active !== undefined ? (body.active ? 1 : 0) : row.active,
+    row.id
+  );
+  res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
+});
+
+app.delete('/api/products/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
+  db.prepare('DELETE FROM products WHERE id = ?').run(row.id);
+  res.json({ ok: true });
+});
+
+// Records a real price change as it happens, computing the 7-day history/sparkline/% change
+// server-side (read-modify-write against the row that's the actual source of truth) instead of
+// the client sending a precomputed next value — same reasoning as customers' record-purchase.
+app.post('/api/products/:id/price', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
+  const { price: newPrice } = req.body || {};
+  if (!(newPrice > 0)) return res.status(400).json({ error: 'ราคาต้องมากกว่า 0' });
+  if (newPrice === row.price) return res.json({ product: toApiProduct(row) });
+  const pct = row.price > 0 ? ((newPrice - row.price) / row.price) * 100 : 0;
+  const dir = newPrice > row.price ? 'up' : newPrice < row.price ? 'down' : 'flat';
+  const today = todayThaiShort();
+  const prevHist = JSON.parse(row.hist || '[]');
+  const hist =
+    prevHist[0]?.d === today
+      ? [{ d: today, v: moneyFmt(newPrice) }, ...prevHist.slice(1)]
+      : [{ d: today, v: moneyFmt(newPrice) }, ...prevHist].slice(0, 7);
+  const prevSpark = JSON.parse(row.spark || '[]');
+  const baseSpark = prevSpark.length ? prevSpark : [newPrice, newPrice, newPrice, newPrice, newPrice, newPrice, newPrice];
+  const spark = [...baseSpark.slice(1), newPrice];
+  db.prepare('UPDATE products SET price = ?, change = ?, dir = ?, hist = ?, spark = ? WHERE id = ?').run(
+    newPrice,
+    formatChangePct(pct),
+    dir,
+    JSON.stringify(hist),
+    JSON.stringify(spark),
+    row.id
+  );
+  res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
+});
+
+// Buying scrap material (see ScrapPurchase.jsx) adds to on-hand stock, matched by name since a
+// purchase row is free-text, not tied to a real product id. A row typed into a blank slot with
+// a name that doesn't match any cataloged product is still a real purchase, so this creates the
+// product (priced at what was actually paid) rather than silently dropping the stock update.
+app.post('/api/products/add-stock', requireAuth, (req, res) => {
+  const { name, weightKg, unitPrice } = req.body || {};
+  const trimmed = (name || '').trim();
+  if (!trimmed || !(weightKg > 0)) return res.status(400).json({ error: 'ข้อมูลไม่ถูกต้อง' });
+  const existing = db.prepare('SELECT * FROM products WHERE name = ?').get(trimmed);
+  if (existing) {
+    const nextStock = formatStock(parseStockStr(existing.stock) + weightKg);
+    db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(nextStock, existing.id);
+    return res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(existing.id)) });
+  }
+  const id = `auto_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+  const price = unitPrice || 0;
+  const spark = JSON.stringify([price, price, price, price, price, price, price]);
+  db.prepare('INSERT INTO products (id, name, price, stock, spark) VALUES (?, ?, ?, ?, ?)').run(id, trimmed, price, formatStock(weightKg), spark);
+  res.status(201).json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(id)) });
+});
+
+// Shipping accumulated stock out to a buyer (see Deliveries.jsx) removes it from on-hand
+// stock, by id — the delivery form picks a real product directly, unlike ScrapPurchase's
+// free-text row names.
+app.post('/api/products/:id/remove-stock', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
+  const { weightKg } = req.body || {};
+  if (weightKg > 0) {
+    const nextStock = formatStock(Math.max(parseStockStr(row.stock) - weightKg, 0));
+    db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(nextStock, row.id);
+  }
+  res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
+});
+
+// Restoring stock to a delivery's original product on delete/edit (see Deliveries.jsx), by id.
+// 404s instead of fabricating a placeholder product if it was deleted since the delivery was
+// created — the client treats that as "couldn't restore automatically" and warns the user,
+// rather than this silently corrupting the catalog with a new placeholder.
+app.post('/api/products/:id/add-stock', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
+  const { weightKg } = req.body || {};
+  if (weightKg > 0) {
+    const nextStock = formatStock(parseStockStr(row.stock) + weightKg);
+    db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(nextStock, row.id);
+  }
+  res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
+});
+
+// Voiding or editing a receipt (see Receipts.jsx) needs to give back stock by name — receipts
+// only ever recorded item names, not ids, matching how add-stock above looks products up. A
+// no-op (not an error) when nothing matches, same as the old client-side behavior.
+app.post('/api/products/remove-stock-by-name', requireAuth, (req, res) => {
+  const { name, weightKg } = req.body || {};
+  const trimmed = (name || '').trim();
+  if (!trimmed || !(weightKg > 0)) return res.json({ ok: true });
+  const row = db.prepare('SELECT * FROM products WHERE name = ?').get(trimmed);
+  if (!row) return res.json({ ok: true });
+  const nextStock = formatStock(Math.max(parseStockStr(row.stock) - weightKg, 0));
+  db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(nextStock, row.id);
+  res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
+});
+
 // React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
 // has to still get index.html from the server (there's no real /receipts file on disk) and let
 // the client-side router take over from there. Registered after every real route above, so it
