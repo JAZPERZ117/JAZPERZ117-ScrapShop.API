@@ -15,6 +15,8 @@ dist-ssr
 # Backend secrets and local database
 server/.env
 server/shop.db
+server/backups
+server/certs
 
 # Local Claude Code runtime state (session-specific, not project source)
 .claude/scheduled_tasks.lock
