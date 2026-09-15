@@ -1044,6 +1044,127 @@ app.delete('/api/categories/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+function toApiScale(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    model: row.model,
+    bg: row.bg,
+    fg: row.fg,
+    port: row.port,
+    conn: row.conn,
+    max: row.max,
+    res: row.res,
+    cal: row.cal,
+    due: row.due,
+    status: row.status,
+    active: !!row.active,
+  };
+}
+
+// Scale devices used to live only in each browser's own localStorage — ScrapPurchase.jsx reads
+// whichever device is flagged `active` as the one to weigh purchases on, so that had to become
+// the same device on every till instead of a per-browser guess.
+app.get('/api/scales', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM scales ORDER BY sort_order ASC, rowid ASC').all();
+  res.json({ scales: rows.map(toApiScale) });
+});
+
+// Manually adding a device ("เพิ่มเครื่องชั่ง") puts it first; a network scan finding one
+// ("สแกนหาเครื่องใหม่") appends it last — same two-rule ordering Scales.jsx already had, now
+// backed by sort_order instead of each browser's own insertion order.
+app.post('/api/scales', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อเครื่องชั่ง' });
+  const id = `scale_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  let sortOrder;
+  if (b.atEnd) {
+    const max = db.prepare('SELECT MAX(sort_order) AS m FROM scales').get();
+    sortOrder = (max.m ?? -1) + 1;
+  } else {
+    const min = db.prepare('SELECT MIN(sort_order) AS m FROM scales').get();
+    sortOrder = (min.m ?? 0) - 1;
+  }
+  db.prepare(
+    `INSERT INTO scales (id, name, model, bg, fg, port, conn, max, res, cal, due, status, active, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    b.name.trim(),
+    b.model || 'ไม่ระบุรุ่น',
+    b.bg || 'var(--bg)',
+    b.fg || 'var(--ink-500)',
+    b.port || '—',
+    b.conn || 'สาย USB / RS-232',
+    b.max || '—',
+    b.res || '—',
+    b.cal || 'ยังไม่เคยสอบเทียบ',
+    b.due || '—',
+    b.status || 'off',
+    b.active ? 1 : 0,
+    sortOrder
+  );
+  const row = db.prepare('SELECT * FROM scales WHERE id = ?').get(id);
+  res.status(201).json({ scale: toApiScale(row) });
+});
+
+app.put('/api/scales/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM scales WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบเครื่องชั่งนี้' });
+  const b = req.body || {};
+  db.prepare(
+    `UPDATE scales SET name = ?, conn = ?, port = ?, status = ?, cal = ?, due = ? WHERE id = ?`
+  ).run(
+    b.name !== undefined ? b.name.trim() || row.name : row.name,
+    b.conn !== undefined ? b.conn : row.conn,
+    b.port !== undefined ? b.port : row.port,
+    b.status !== undefined ? b.status : row.status,
+    b.cal !== undefined ? b.cal : row.cal,
+    b.due !== undefined ? b.due : row.due,
+    row.id
+  );
+  res.json({ scale: toApiScale(db.prepare('SELECT * FROM scales WHERE id = ?').get(row.id)) });
+});
+
+// "ใช้เป็นเครื่องชั่งหลัก" is exclusive — only one device can be the one ScrapPurchase.jsx reads
+// from — so this clears every other device's `active` flag in the same statement instead of the
+// client computing that exclusivity itself and risking two devices ending up active at once.
+app.put('/api/scales/:id/set-active', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM scales WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบเครื่องชั่งนี้' });
+  const active = !!(req.body || {}).active;
+  if (active) db.prepare('UPDATE scales SET active = 0').run();
+  db.prepare('UPDATE scales SET active = ? WHERE id = ?').run(active ? 1 : 0, row.id);
+  res.json({ scale: toApiScale(db.prepare('SELECT * FROM scales WHERE id = ?').get(row.id)) });
+});
+
+app.delete('/api/scales/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM scales WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบเครื่องชั่งนี้' });
+  // ScrapPurchase.jsx reads the main device unconditionally, so it can never be left with zero.
+  const count = db.prepare('SELECT COUNT(*) AS c FROM scales').get().c;
+  if (count <= 1) return res.status(400).json({ error: 'ต้องมีเครื่องชั่งอย่างน้อย 1 เครื่อง ไม่สามารถนำเครื่องสุดท้ายออกได้' });
+  db.prepare('DELETE FROM scales WHERE id = ?').run(row.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/scales-activity', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM scale_activity ORDER BY id DESC LIMIT 20').all();
+  res.json({ activity: rows.map((r) => ({ icon: r.icon, title: r.title, sub: r.sub, amt: r.amt })) });
+});
+
+app.post('/api/scales-activity', requireAuth, (req, res) => {
+  const b = req.body || {};
+  db.prepare('INSERT INTO scale_activity (icon, title, sub, amt) VALUES (?, ?, ?, ?)').run(
+    b.icon || 'ok',
+    b.title || '',
+    b.sub || '',
+    b.amt || ''
+  );
+  const rows = db.prepare('SELECT * FROM scale_activity ORDER BY id DESC LIMIT 20').all();
+  res.status(201).json({ activity: rows.map((r) => ({ icon: r.icon, title: r.title, sub: r.sub, amt: r.amt })) });
+});
+
 // React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
 // has to still get index.html from the server (there's no real /receipts file on disk) and let
 // the client-side router take over from there. Registered after every real route above, so it

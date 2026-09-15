@@ -289,8 +289,8 @@ export default function ScrapPurchase() {
   }
 
   function pullWeight() {
-    if (mainScale.status !== 'on') {
-      setBanner({ type: 'error', text: `${mainScale.name} ไม่ได้เชื่อมต่ออยู่ — ไปที่หน้า "เครื่องชั่ง" เพื่อเชื่อมต่อก่อน` });
+    if (!mainScale || mainScale.status !== 'on') {
+      setBanner({ type: 'error', text: `${mainScale?.name || 'เครื่องชั่ง'} ไม่ได้เชื่อมต่ออยู่ — ไปที่หน้า "เครื่องชั่ง" เพื่อเชื่อมต่อก่อน` });
       return;
     }
     if (rows.length === 0) {
@@ -711,14 +711,14 @@ export default function ScrapPurchase() {
                   <IconScale />
                 </div>
                 <div>
-                  <div className="scale-label">น้ำหนักจากเครื่องชั่งดิจิทัล ({mainScale.name})</div>
+                  <div className="scale-label">น้ำหนักจากเครื่องชั่งดิจิทัล ({mainScale?.name || '—'})</div>
                   <div className="scale-reading">
                     {scaleReading.toFixed(2)}
                     <span className="u">กก.</span>
                   </div>
                   <div className="scale-status">
-                    <span className="scale-dot" style={{ background: mainScale.status === 'on' ? undefined : 'var(--ink-300)' }}></span>
-                    {mainScale.status === 'on' ? 'เชื่อมต่อแล้ว' : 'ไม่ได้เชื่อมต่อ'} · พอร์ต {mainScale.port}
+                    <span className="scale-dot" style={{ background: mainScale?.status === 'on' ? undefined : 'var(--ink-300)' }}></span>
+                    {mainScale?.status === 'on' ? 'เชื่อมต่อแล้ว' : 'ไม่ได้เชื่อมต่อ'} · พอร์ต {mainScale?.port || '—'}
                   </div>
                 </div>
               </div>
