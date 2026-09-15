@@ -33,4 +33,32 @@ if (!userColumns.includes('active')) {
 // non-null PINs colliding — any number of accounts with no PIN set is still fine.
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_pin ON users(pin) WHERE pin IS NOT NULL');
 
+// Customer records — including ID card numbers and photos — used to live only in each
+// browser's own localStorage, unencrypted and readable by anyone with DevTools access to that
+// browser profile, with no login required at all. Moved into the real, requireAuth-gated
+// database for the same reason PIN accounts were: it's the only way this data is centrally
+// backed up, synced across every device in the shop, and actually behind a login check.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS customers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
+    init TEXT NOT NULL DEFAULT '',
+    bg TEXT NOT NULL DEFAULT 'var(--green-100)',
+    fg TEXT NOT NULL DEFAULT 'var(--green-700)',
+    id_number TEXT NOT NULL DEFAULT '',
+    id_expiry TEXT NOT NULL DEFAULT '',
+    id_photo TEXT NOT NULL DEFAULT '',
+    addr TEXT NOT NULL DEFAULT 'ยังไม่ได้บันทึกที่อยู่',
+    tag TEXT NOT NULL DEFAULT 'general',
+    weight TEXT NOT NULL DEFAULT '0.00 กก.',
+    total TEXT NOT NULL DEFAULT '฿0.00',
+    visits TEXT NOT NULL DEFAULT '0 ครั้ง',
+    since TEXT NOT NULL DEFAULT '',
+    last_visit TEXT NOT NULL DEFAULT 'ยังไม่เคยซื้อขาย',
+    hist TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;
