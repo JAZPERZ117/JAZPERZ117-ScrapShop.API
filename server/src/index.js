@@ -897,6 +897,86 @@ app.get('/api/pay-history', requireAuth, (req, res) => {
   res.json({ payHistory: rows.map(toApiPayRecord) });
 });
 
+function toApiReason(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    desc: row.desc,
+    bg: row.bg,
+    fg: row.fg,
+    type: row.type,
+    value: row.value,
+    uses: row.uses,
+    total: row.total,
+    active: !!row.active,
+  };
+}
+
+// Deduction reasons used to live only in each browser's own localStorage — the usage counters
+// (uses/total) specifically need to be the same number everywhere, since a reason applied to a
+// purchase on any device should count toward the same running total every other device sees.
+app.get('/api/deduction-reasons', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM deduction_reasons ORDER BY created_at DESC, rowid DESC').all();
+  res.json({ reasons: rows.map(toApiReason) });
+});
+
+app.post('/api/deduction-reasons', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อเหตุผล' });
+  const id = `reason_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  db.prepare(
+    'INSERT INTO deduction_reasons (id, name, desc, type, value) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, b.name.trim(), b.desc || '', b.type || 'fixed', b.value ?? '0');
+  const row = db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(id);
+  res.status(201).json({ reason: toApiReason(row) });
+});
+
+app.put('/api/deduction-reasons/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบเหตุผลนี้' });
+  const b = req.body || {};
+  db.prepare(
+    `UPDATE deduction_reasons SET name = ?, desc = ?, type = ?, value = ?, active = ? WHERE id = ?`
+  ).run(
+    b.name !== undefined ? b.name.trim() || row.name : row.name,
+    b.desc !== undefined ? b.desc : row.desc,
+    b.type !== undefined ? b.type : row.type,
+    b.value !== undefined ? b.value : row.value,
+    b.active !== undefined ? (b.active ? 1 : 0) : row.active,
+    row.id
+  );
+  res.json({ reason: toApiReason(db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(row.id)) });
+});
+
+app.delete('/api/deduction-reasons/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบเหตุผลนี้' });
+  db.prepare('DELETE FROM deduction_reasons WHERE id = ?').run(row.id);
+  res.json({ ok: true });
+});
+
+// Called once per reason actually applied on a submitted receipt (see ScrapPurchase.jsx), so
+// "ใช้แล้ว N ครั้ง"/"ยอดหักรวม" reflect real usage — read-modify-write against the row that's
+// the actual source of truth, same reasoning as customers' record-purchase.
+app.post('/api/deduction-reasons/:id/increment-usage', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(req.params.id);
+  if (!row) return res.json({ ok: true });
+  const { amount } = req.body || {};
+  db.prepare('UPDATE deduction_reasons SET uses = uses + 1, total = total + ? WHERE id = ?').run(amount || 0, row.id);
+  res.json({ reason: toApiReason(db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(row.id)) });
+});
+
+// Inverse of increment-usage — called when a receipt that applied this reason gets voided
+// (see Receipts.jsx handleVoid), so the counters don't stay permanently inflated by a purchase
+// that was fully reversed everywhere else.
+app.post('/api/deduction-reasons/:id/decrement-usage', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(req.params.id);
+  if (!row) return res.json({ ok: true });
+  const { amount } = req.body || {};
+  db.prepare('UPDATE deduction_reasons SET uses = MAX(uses - 1, 0), total = MAX(total - ?, 0) WHERE id = ?').run(amount || 0, row.id);
+  res.json({ reason: toApiReason(db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(row.id)) });
+});
+
 // React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
 // has to still get index.html from the server (there's no real /receipts file on disk) and let
 // the client-side router take over from there. Registered after every real route above, so it
