@@ -213,4 +213,21 @@ db.exec(`
   );
 `);
 
+// Categories used to live only in each browser's own localStorage. `sort_order` backs the
+// page's manual "เรียงลำดับ" (sort by name asc/desc) action — explicit, not derived from
+// creation time, since the user can re-sort the list at will and that choice needs to persist
+// and be the same on every device, not just insertion order.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    icon_key TEXT NOT NULL DEFAULT 'other',
+    color TEXT NOT NULL DEFAULT 'slate',
+    desc TEXT NOT NULL DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;

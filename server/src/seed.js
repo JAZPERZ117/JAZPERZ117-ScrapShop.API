@@ -94,3 +94,22 @@ for (const r of INITIAL_REASONS) {
   ).run(r.id, r.name, r.desc, r.bg, r.fg, r.type, r.value, r.active);
   console.log(`สร้างเหตุผลหักน้ำหนักตั้งต้นสำเร็จ: ${r.name}`);
 }
+
+// Starting categories (see src/context/CategoriesContext.jsx's old INITIAL_CATEGORIES_RAW).
+// sort_order here is just the seed's natural display order (0..N-1).
+const INITIAL_CATEGORIES = [
+  { id: 'metal', name: 'โลหะ', iconKey: 'metal', color: 'amber', desc: 'เศษโลหะทุกชนิด เช่น เหล็ก ทองแดง อลูมิเนียม สแตนเลส และทองเหลือง', isActive: 1 },
+  { id: 'paper', name: 'กระดาษ', iconKey: 'paper', color: 'blue', desc: 'กระดาษลัง กระดาษหนังสือพิมพ์ กระดาษขาว-ดำ และกระดาษรวม', isActive: 1 },
+  { id: 'plastic', name: 'พลาสติก', iconKey: 'plastic', color: 'plum', desc: 'ขวดพลาสติก ถุงพลาสติก และพลาสติกแข็งทุกชนิด', isActive: 1 },
+  { id: 'glass', name: 'แก้ว', iconKey: 'glass', color: 'teal', desc: 'ขวดแก้วใส ขวดแก้วสี และเศษแก้วทุกชนิด', isActive: 1 },
+  { id: 'electronics', name: 'อิเล็กทรอนิกส์', iconKey: 'electronics', color: 'rose', desc: 'อุปกรณ์อิเล็กทรอนิกส์เก่า แผงวงจร และสายไฟ (ปิดใช้งานชั่วคราว)', isActive: 0 },
+  { id: 'other', name: 'อื่นๆ', iconKey: 'other', color: 'slate', desc: 'สินค้าเบ็ดเตล็ดที่ไม่เข้าหมวดหมู่หลัก', isActive: 1 },
+];
+INITIAL_CATEGORIES.forEach((c, i) => {
+  const already = db.prepare('SELECT id FROM categories WHERE id = ?').get(c.id);
+  if (already) return;
+  db.prepare(
+    'INSERT INTO categories (id, name, icon_key, color, desc, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(c.id, c.name, c.iconKey, c.color, c.desc, c.isActive, i);
+  console.log(`สร้างหมวดหมู่ตั้งต้นสำเร็จ: ${c.name}`);
+});
