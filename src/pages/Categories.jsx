@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { IconCategory, IconSort, IconPlus, IconCheck, IconBottle, IconX } from '../icons.jsx';
 import { useCategories, SWATCHES, SWATCH_COLOR } from '../context/CategoriesContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
@@ -18,7 +18,7 @@ function money(n) {
 }
 
 export default function Categories() {
-  const { categories, setCategoriesRaw, order, setOrder } = useCategories();
+  const { categories, order, createCategory, updateCategory, deleteCategory, reorderCategories } = useCategories();
   const { products, reassignCategory } = useProducts();
   const { receipts } = useReceipts();
   const [selectedId, setSelectedId] = useState(order[0]);
@@ -31,7 +31,13 @@ export default function Categories() {
   const [newDesc, setNewDesc] = useState('');
   const [banner, setBanner] = useState(null);
 
-  const c = categories[selectedId];
+  // Categories now load asynchronously from the server (see CategoriesContext.jsx), so `order`
+  // is still empty on the very first render — select the first real category once data
+  // actually loads, same fix already applied to Receipts/Products/Customers/Payroll/Deductions.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) select(order[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, selectedId]);
 
   // All per-category numbers below are derived live from real Products/Receipts data
   // instead of hardcoded figures, so they stay correct after any add/edit/delete.
@@ -79,6 +85,12 @@ export default function Categories() {
   const topCategoryId = order.reduce((best, id) => (!best || categoryStats[id]?.revenue > categoryStats[best]?.revenue ? id : best), null);
   const topCategories = [...order].sort((a, b) => (categoryStats[b]?.revenue || 0) - (categoryStats[a]?.revenue || 0)).slice(0, 3);
 
+  const c = categories[selectedId];
+  // `categories[selectedId]` can briefly be missing while data loads — bail out rather than
+  // rendering a detail panel built from `undefined` (c.color, c.name, etc.). Placed after
+  // every hook above so the hook call order stays identical across renders.
+  if (!c) return null;
+
   function select(id) {
     setSelectedId(id);
     setSwatch(categories[id].color);
@@ -86,37 +98,48 @@ export default function Categories() {
     setEditDesc(categories[id].desc);
   }
 
-  function toggleActive() {
-    setCategoriesRaw((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], isActive: !prev[selectedId].isActive } }));
+  async function toggleActive() {
+    try {
+      await updateCategory(selectedId, { isActive: !c.isActive });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
-  function handleSort() {
+  async function handleSort() {
     const next = [...order].sort((a, b) => (sortAsc ? categories[a].name.localeCompare(categories[b].name, 'th') : categories[b].name.localeCompare(categories[a].name, 'th')));
-    setOrder(next);
+    await reorderCategories(next);
     setSortAsc((v) => !v);
     setBanner({ type: 'success', text: `เรียงลำดับหมวดหมู่ตามชื่อ ${sortAsc ? 'ก-ฮ' : 'ฮ-ก'} แล้ว` });
   }
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
     if (!newName.trim()) return;
-    const id = `cat_${Date.now()}`;
-    setCategoriesRaw((prev) => ({ ...prev, [id]: { name: newName.trim(), iconKey: 'other', color: 'slate', desc: newDesc.trim(), isActive: true } }));
-    setOrder((prev) => [id, ...prev]);
-    setSelectedId(id);
-    setSwatch('slate');
-    setEditName(newName.trim());
-    setEditDesc(newDesc.trim());
-    setNewName('');
-    setNewDesc('');
-    setShowNew(false);
-    setBanner({ type: 'success', text: `เพิ่มหมวดหมู่ ${newName.trim()} เรียบร้อยแล้ว` });
+    try {
+      const created = await createCategory({ name: newName.trim(), desc: newDesc.trim() });
+      setSelectedId(created.id);
+      setSwatch(created.color);
+      setEditName(created.name);
+      setEditDesc(created.desc);
+      setNewName('');
+      setNewDesc('');
+      setShowNew(false);
+      setBanner({ type: 'success', text: `เพิ่มหมวดหมู่ ${newName.trim()} เรียบร้อยแล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
   async function handleSave() {
     const nextName = editName.trim() || c.name;
     const prevName = c.name;
-    setCategoriesRaw((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], name: nextName, desc: editDesc, color: swatch } }));
+    try {
+      await updateCategory(selectedId, { name: nextName, desc: editDesc, color: swatch });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     // Products reference their category by name, not id (see ProductsContext.jsx) — without
     // this, renaming a category would silently orphan every product already assigned to it:
     // they'd keep the old name string and drop out of this category everywhere it's grouped.
@@ -140,12 +163,12 @@ export default function Categories() {
     // back to "อื่นๆ" if it's still around, otherwise the first remaining category.
     const fallbackName = categories[remaining.find((id) => categories[id].name === 'อื่นๆ')]?.name || categories[remaining[0]]?.name;
     const movedCount = await reassignCategory(deletedName, fallbackName);
-    setOrder(remaining);
-    setCategoriesRaw((prev) => {
-      const next = { ...prev };
-      delete next[selectedId];
-      return next;
-    });
+    try {
+      await deleteCategory(selectedId);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     if (remaining[0]) select(remaining[0]);
     setBanner({
       type: 'error',

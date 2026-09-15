@@ -977,6 +977,73 @@ app.post('/api/deduction-reasons/:id/decrement-usage', requireAuth, (req, res) =
   res.json({ reason: toApiReason(db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(row.id)) });
 });
 
+function toApiCategory(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    iconKey: row.icon_key,
+    color: row.color,
+    desc: row.desc,
+    isActive: !!row.is_active,
+  };
+}
+
+// Categories used to live only in each browser's own localStorage.
+app.get('/api/categories', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM categories ORDER BY sort_order ASC, rowid ASC').all();
+  res.json({ categories: rows.map(toApiCategory) });
+});
+
+app.post('/api/categories', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อหมวดหมู่' });
+  const id = `cat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  // New categories go to the front of the list, matching every other resource's
+  // "newest first" convention — the lowest sort_order sorts first.
+  const min = db.prepare('SELECT MIN(sort_order) AS m FROM categories').get();
+  const sortOrder = (min.m ?? 0) - 1;
+  db.prepare(
+    'INSERT INTO categories (id, name, icon_key, color, desc, is_active, sort_order) VALUES (?, ?, ?, ?, ?, 1, ?)'
+  ).run(id, b.name.trim(), b.iconKey || 'other', b.color || 'slate', b.desc || '', sortOrder);
+  const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+  res.status(201).json({ category: toApiCategory(row) });
+});
+
+// Persists a full manual reorder (see Categories.jsx's "เรียงลำดับ" sort-by-name action) —
+// registered before PUT /api/categories/:id below, since Express would otherwise match the
+// literal path segment "reorder" as an :id.
+app.put('/api/categories/reorder', requireAuth, (req, res) => {
+  const { order } = req.body || {};
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'ข้อมูลไม่ถูกต้อง' });
+  const update = db.prepare('UPDATE categories SET sort_order = ? WHERE id = ?');
+  order.forEach((id, i) => update.run(i, id));
+  const rows = db.prepare('SELECT * FROM categories ORDER BY sort_order ASC, rowid ASC').all();
+  res.json({ categories: rows.map(toApiCategory) });
+});
+
+app.put('/api/categories/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบหมวดหมู่นี้' });
+  const b = req.body || {};
+  db.prepare(
+    `UPDATE categories SET name = ?, color = ?, desc = ?, is_active = ? WHERE id = ?`
+  ).run(
+    b.name !== undefined ? b.name.trim() || row.name : row.name,
+    b.color !== undefined ? b.color : row.color,
+    b.desc !== undefined ? b.desc : row.desc,
+    b.isActive !== undefined ? (b.isActive ? 1 : 0) : row.is_active,
+    row.id
+  );
+  res.json({ category: toApiCategory(db.prepare('SELECT * FROM categories WHERE id = ?').get(row.id)) });
+});
+
+app.delete('/api/categories/:id', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบหมวดหมู่นี้' });
+  db.prepare('DELETE FROM categories WHERE id = ?').run(row.id);
+  res.json({ ok: true });
+});
+
 // React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
 // has to still get index.html from the server (there's no real /receipts file on disk) and let
 // the client-side router take over from there. Registered after every real route above, so it
