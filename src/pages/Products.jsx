@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { exportCsv } from '../lib/csvExport.js';
 import {
   IconBox,
@@ -77,6 +77,14 @@ export default function Products() {
   const [newPrice, setNewPrice] = useState('');
   const [newCat, setNewCat] = useState(activeCategoryNames[0] || 'อื่นๆ');
   const [banner, setBanner] = useState(null);
+  // Products now load asynchronously from the server (see ProductsContext.jsx), so `order` is
+  // still empty on the very first render — every `useState(... order[0] ...)` above only runs
+  // once and captures nothing. Once the fetch resolves, select the first real product so the
+  // detail form (price/stock/category inputs) actually has something to show and edit.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) selectProduct(order[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, selectedId]);
 
   const rows = useMemo(() => {
     return order.filter((id) => {

@@ -552,6 +552,116 @@ app.post('/api/products/remove-stock-by-name', requireAuth, (req, res) => {
   res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
 });
 
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function toApiReceipt(row) {
+  return {
+    no: row.no,
+    date: row.date,
+    time: row.time,
+    cust: row.cust,
+    custId: row.cust_id,
+    issuedBy: row.issued_by,
+    init: row.init,
+    bg: row.bg,
+    fg: row.fg,
+    status: row.status,
+    weight: row.weight,
+    deductionWeight: row.deduction_weight,
+    deductionLabel: row.deduction_label,
+    note: row.note,
+    method: row.method,
+    items: JSON.parse(row.items || '[]'),
+    total: row.total,
+    deductionUsage: JSON.parse(row.deduction_usage || '[]'),
+    voidedAt: row.voided_at,
+  };
+}
+
+// Receipts — the core transaction record every report page (Dashboard, DailySummary, Monthly/
+// AnnualReport, TaxReport, ProductReport) reads from — used to live only in each browser's own
+// localStorage. A sale rung up on one device needs to show up in every other device's "today's
+// receipts" and totals immediately, not stay invisible until someone happens to look at that
+// one browser.
+app.get('/api/receipts', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM receipts ORDER BY created_at DESC, rowid DESC').all();
+  res.json({ receipts: rows.map(toApiReceipt) });
+});
+
+app.post('/api/receipts', requireAuth, (req, res) => {
+  const b = req.body || {};
+  if (!b.no) return res.status(400).json({ error: 'ไม่มีเลขที่ใบเสร็จ' });
+  if (db.prepare('SELECT no FROM receipts WHERE no = ?').get(b.no)) {
+    return res.status(409).json({ error: `เลขที่ใบเสร็จ ${b.no} ถูกใช้แล้ว` });
+  }
+  db.prepare(
+    `INSERT INTO receipts (no, date, time, cust, cust_id, issued_by, init, bg, fg, status, weight, deduction_weight, deduction_label, note, method, items, total, deduction_usage)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    b.no,
+    b.date || todayISO(),
+    b.time || '',
+    b.cust || '',
+    b.custId || null,
+    b.issuedBy || '',
+    b.init || '',
+    b.bg || '',
+    b.fg || '',
+    b.status || 'ok',
+    b.weight || '0.00 กก.',
+    b.deductionWeight || 0,
+    b.deductionLabel || '',
+    b.note || '',
+    b.method || '',
+    JSON.stringify(b.items || []),
+    b.total || '฿0.00',
+    JSON.stringify(b.deductionUsage || [])
+  );
+  const row = db.prepare('SELECT * FROM receipts WHERE no = ?').get(b.no);
+  res.status(201).json({ receipt: toApiReceipt(row) });
+});
+
+// Cancelling a purchase — separate from the general edit below since it only ever flips status
+// (plus a timestamp for Dashboard.jsx's "most recently voided" ordering); the actual stock and
+// customer-total reversal happens via the products/customers endpoints, called independently by
+// the client, same as this codebase's existing void flow already did client-side.
+app.put('/api/receipts/:no/void', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM receipts WHERE no = ?').get(req.params.no);
+  if (!row) return res.status(404).json({ error: 'ไม่พบใบเสร็จนี้' });
+  if (row.status !== 'void') {
+    db.prepare('UPDATE receipts SET status = ?, voided_at = ? WHERE no = ?').run('void', Date.now(), row.no);
+  }
+  res.json({ receipt: toApiReceipt(db.prepare('SELECT * FROM receipts WHERE no = ?').get(row.no)) });
+});
+
+// Editing a receipt's items/weights (see Receipts.jsx) — refuses once voided for the same
+// reason the old client-side check did: a void has already reversed stock/customer totals
+// against the pre-edit numbers, so an edit landing afterward would drift them out of sync.
+app.put('/api/receipts/:no', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT * FROM receipts WHERE no = ?').get(req.params.no);
+  if (!row) return res.status(404).json({ error: 'ไม่พบใบเสร็จนี้' });
+  if (row.status === 'void') return res.status(409).json({ error: 'ใบเสร็จนี้ถูกยกเลิกไปแล้ว ไม่สามารถแก้ไขได้' });
+  const b = req.body || {};
+  db.prepare(
+    `UPDATE receipts SET cust = ?, init = ?, method = ?, note = ?, items = ?, weight = ?, deduction_weight = ?, deduction_label = ?, total = ? WHERE no = ?`
+  ).run(
+    b.cust !== undefined ? b.cust : row.cust,
+    b.init !== undefined ? b.init : row.init,
+    b.method !== undefined ? b.method : row.method,
+    b.note !== undefined ? b.note : row.note,
+    b.items !== undefined ? JSON.stringify(b.items) : row.items,
+    b.weight !== undefined ? b.weight : row.weight,
+    b.deductionWeight !== undefined ? b.deductionWeight : row.deduction_weight,
+    b.deductionLabel !== undefined ? b.deductionLabel : row.deduction_label,
+    b.total !== undefined ? b.total : row.total,
+    row.no
+  );
+  res.json({ receipt: toApiReceipt(db.prepare('SELECT * FROM receipts WHERE no = ?').get(row.no)) });
+});
+
 // React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
 // has to still get index.html from the server (there's no real /receipts file on disk) and let
 // the client-side router take over from there. Registered after every real route above, so it

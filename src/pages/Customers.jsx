@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { exportCsv } from '../lib/csvExport.js';
 import { useCustomers, INITIAL_ORDER } from '../context/CustomersContext.jsx';
@@ -29,6 +29,13 @@ export default function Customers() {
     [order, customers]
   );
   const [selectedId, setSelectedId] = useState(order[0]);
+  // Customers now load asynchronously from the server (see CustomersContext.jsx), so `order`
+  // is still empty on the very first render — `useState(order[0])` above only runs once and
+  // captures nothing. Once the fetch resolves, select the first real customer instead of
+  // leaving `customers[selectedId]` (and everything below that reads it unguarded) undefined.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) setSelectedId(order[0]);
+  }, [order, selectedId]);
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [showNew, setShowNew] = useState(false);

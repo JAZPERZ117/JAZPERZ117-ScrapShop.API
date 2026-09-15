@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { exportCsv } from '../lib/csvExport.js';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
@@ -75,7 +75,7 @@ function parseItemLine(w) {
 
 export default function Receipts() {
   const navigate = useNavigate();
-  const { receipts, setReceipts, order } = useReceipts();
+  const { receipts, order, voidReceipt, updateReceipt } = useReceipts();
   const { settings } = useSettings();
   const { reversePurchase, recordPurchase } = useCustomers();
   const { removeStockByName, addStock } = useProducts();
@@ -84,6 +84,15 @@ export default function Receipts() {
   const [query, setQuery] = useState('');
   const [dateFilter, setDateFilter] = useState('');
   const [selectedId, setSelectedId] = useState(order[0]);
+  // Receipts now load asynchronously from the server (see ReceiptsContext.jsx), so `order` is
+  // still empty on the very first render — the `useState(order[0])` above only runs once and
+  // captures `undefined`. Once the fetch resolves and receipts actually exist, point selection
+  // at the first one; every action below (edit, void, print) silently no-ops on an id that
+  // isn't in `receipts`, so without this the whole page looks broken until something else
+  // happens to call setSelectedId.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) setSelectedId(order[0]);
+  }, [order, selectedId]);
   const [banner, setBanner] = useState(null);
   // Below ~1100px the list and preview panel stack vertically instead of sitting side by
   // side (see .grid's media query in common.css) — on that layout, clicking "ดูตัวอย่าง"/
@@ -168,7 +177,7 @@ export default function Receipts() {
     setActivity((prev) => [{ text, time: nowTimeStr() }, ...prev].slice(0, 10));
   }
 
-  function handleVoid(id = selectedId) {
+  async function handleVoid(id = selectedId) {
     const target = receipts[id];
     if (target.status === 'void') return;
     if (!window.confirm(`ยืนยันยกเลิกใบเสร็จ ${target.no}?`)) return;
@@ -182,7 +191,12 @@ export default function Receipts() {
     // Voiding from the row menu can target a receipt other than the one currently shown in
     // the preview panel — select it so the panel reflects the receipt that was just voided.
     setSelectedId(id);
-    setReceipts((prev) => ({ ...prev, [id]: { ...prev[id], status: 'void', voidedAt: Date.now() } }));
+    try {
+      await voidReceipt(id);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     // A voided purchase never happened, so give back what it took: the stock it added
     // (matched by item name, mirroring how ScrapPurchase.jsx's addStock looked it up) and
     // the customer's lifetime weight/spend/visit bump (only possible for receipts that
@@ -293,7 +307,7 @@ export default function Receipts() {
   const editDeductionMoney = editDeductionWeight * editBlendedPrice;
   const editGrandTotal = Math.max(editSubtotal - editDeductionMoney, 0);
 
-  function saveEdit() {
+  async function saveEdit() {
     if (receipts[editForm.id]?.status === 'void') {
       setBanner({ type: 'error', text: `ใบเสร็จ ${receipts[editForm.id]?.no} ถูกยกเลิกไปแล้ว ไม่สามารถบันทึกการแก้ไขได้` });
       setIsEditing(false);
@@ -319,6 +333,22 @@ export default function Receipts() {
       // would have to fall back to regex-parsing the weight back out of the display string.
       return { n: it.name.trim(), w: `${w.toFixed(2)} กก. × ${money(p)}`, netWeight: w, t: money(w * p) };
     });
+    try {
+      await updateReceipt(id, {
+        cust: editForm.cust.trim(),
+        init: initials(editForm.cust.trim()),
+        method: editForm.method,
+        note: editForm.note.trim(),
+        items: newItems,
+        weight: editTotalWeight.toFixed(2) + ' กก.',
+        deductionWeight: editDeductionWeight,
+        deductionLabel: editForm.deductionLabel.trim(),
+        total: money(editGrandTotal),
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     // Editing a receipt's items/weights must keep stock and the customer's lifetime totals in
     // sync — reverse exactly what the original items/total added, then apply the edited ones,
     // the same inverse-then-reapply shape handleVoid already uses for a full cancellation.
@@ -336,21 +366,6 @@ export default function Receipts() {
       reversePurchase(original.custId, { weightKg: parseWeightKg(original.weight), amount: parseMoney(original.total), receiptNo: original.no });
       recordPurchase(original.custId, { weightKg: editTotalWeight, amount: editGrandTotal, receiptNo: original.no, timeStr: nowTimeStr() });
     }
-    setReceipts((prev) => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
-        cust: editForm.cust.trim(),
-        init: initials(editForm.cust.trim()),
-        method: editForm.method,
-        note: editForm.note.trim(),
-        items: newItems,
-        weight: editTotalWeight.toFixed(2) + ' กก.',
-        deductionWeight: editDeductionWeight,
-        deductionLabel: editForm.deductionLabel.trim(),
-        total: money(editGrandTotal),
-      },
-    }));
     logActivity(`แก้ไขใบเสร็จ ${original.no}`);
     setBanner({ type: 'success', text: `บันทึกการแก้ไขใบเสร็จ ${original.no} แล้ว — ปรับสต็อกสินค้าและยอดสะสมลูกค้าให้ตรงกับรายการที่แก้ไขแล้ว` });
     setIsEditing(false);
