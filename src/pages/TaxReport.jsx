@@ -7,7 +7,6 @@ import './TaxReport.css';
 
 const TAX_YEAR_BE = new Date().getFullYear() + 543;
 const THIS_MONTH_SHORT = new Intl.DateTimeFormat('th-TH', { month: 'short' }).format(new Date());
-const YTD_LABEL = `ม.ค.–${THIS_MONTH_SHORT}`;
 const MONTH_LABELS_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 
 function money(n) {
@@ -89,6 +88,10 @@ export default function TaxReport() {
   const expenseDeduct = totalIncome * 0.6;
   const personalDeduct = isHalfYear ? 30000 : 60000;
   const periodLabel = isHalfYear ? `1 ม.ค. – 30 มิ.ย. ${TAX_YEAR_BE} (ครึ่งปีแรก)` : `1 ม.ค. – 31 ธ.ค. ${TAX_YEAR_BE} (เต็มปี)`;
+  // Reactive to the ภงด.90/94 toggle — ภงด.94 only ever sums Jan-Jun (see lastMonthIndex
+  // above), so the label next to that sum must say so too instead of always claiming
+  // "up to the current month," which overstates the period an ภงด.94 total actually covers.
+  const ytdLabel = isHalfYear ? 'ม.ค.–มิ.ย.' : `ม.ค.–${THIS_MONTH_SHORT}`;
   const netIncome = Math.max(totalIncome - expenseDeduct - personalDeduct, 0);
   const estimatedTax = calcProgressiveTax(netIncome);
 
@@ -134,7 +137,7 @@ export default function TaxReport() {
           <div>
             <div className="stat-label">รายได้รวมทั้งปี</div>
             <div className="stat-value">{money(totalIncome)}</div>
-            <div className="stat-foot">ถึงปัจจุบัน ({YTD_LABEL})</div>
+            <div className="stat-foot">ถึงปัจจุบัน ({ytdLabel})</div>
           </div>
         </div>
         <div className="stat-card">
@@ -240,7 +243,7 @@ export default function TaxReport() {
                   </tr>
                 ))}
                 <tr style={{ fontWeight: 600, background: 'var(--green-50)' }}>
-                  <td>รวมทั้งสิ้น ({YTD_LABEL})</td>
+                  <td>รวมทั้งสิ้น ({ytdLabel})</td>
                   <td className="num-cell">{money(totalIncome)}</td>
                   <td className="num-cell">{totalWeightKg.toLocaleString('th-TH')} กก.</td>
                   <td className="num-cell">{totalReceiptCount} ใบ</td>
@@ -362,7 +365,7 @@ export default function TaxReport() {
                 </tr>
               ))}
               <tr className="a4-doc-total-row">
-                <td>รวมทั้งสิ้น ({YTD_LABEL})</td>
+                <td>รวมทั้งสิ้น ({ytdLabel})</td>
                 <td className="num">{money(totalIncome)}</td>
                 <td className="num">{totalWeightKg.toLocaleString('th-TH')} กก.</td>
                 <td className="num">{totalReceiptCount} ใบ</td>

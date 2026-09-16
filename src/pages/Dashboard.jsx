@@ -46,6 +46,16 @@ function parseMoney(s) {
   return parseFloat(String(s).replace(/[^\d.]/g, '')) || 0;
 }
 
+// A receipt's item totals (it.t) only ever have that item's own row-level deduction
+// subtracted — the receipt's separate "หักน้ำหนักรวม" blanket deduction is subtracted once
+// from the whole receipt (receipts[id].total), never allocated back onto items. Summing raw
+// it.t across a receipt's items overstates revenue by exactly that blanket deduction whenever
+// one was used. Scale each item down so a receipt's items sum to its own correct total.
+function receiptItemScale(r) {
+  const itemsSum = (r.items || []).reduce((s, it) => s + parseMoney(it.t), 0);
+  return itemsSum > 0 ? parseMoney(r.total) / itemsSum : 1;
+}
+
 // Local, not UTC — matches ReceiptsContext.jsx's own todayISO(), which is what every
 // receipt's `date` field is actually stamped with.
 function todayISO() {
@@ -97,8 +107,10 @@ export default function Dashboard() {
   const topProducts = useMemo(() => {
     const byName = {};
     for (const id of activeReceipts) {
-      for (const it of receipts[id].items || []) {
-        byName[it.n] = (byName[it.n] || 0) + parseMoney(it.t);
+      const r = receipts[id];
+      const scale = receiptItemScale(r);
+      for (const it of r.items || []) {
+        byName[it.n] = (byName[it.n] || 0) + parseMoney(it.t) * scale;
       }
     }
     return Object.entries(byName)

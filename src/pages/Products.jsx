@@ -69,6 +69,7 @@ export default function Products() {
   const [selectedId, setSelectedId] = useState(order[0]);
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [priceInput, setPriceInput] = useState(products[order[0]] ? products[order[0]].price.toFixed(2) : '0.00');
   const [stockInput, setStockInput] = useState(products[order[0]]?.stock || '');
   const [catInput, setCatInput] = useState(products[order[0]]?.cat || categoryNames[0] || 'อื่นๆ');
@@ -91,11 +92,12 @@ export default function Products() {
       const p = products[id];
       if (filter === 'active' && !p.active) return false;
       if (filter === 'inactive' && p.active) return false;
+      if (categoryFilter && p.cat !== categoryFilter) return false;
       const q = query.trim().toLowerCase();
       if (q && !p.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [filter, query, products, order]);
+  }, [filter, query, categoryFilter, products, order]);
 
   const p = products[selectedId];
   const DirIcon = p ? dirIcon[p.dir] : null;
@@ -307,7 +309,14 @@ export default function Products() {
               <IconBox style={{ width: 16, height: 16 }} />
               <input placeholder="ค้นหาชื่อสินค้า" value={query} onChange={(e) => setQuery(e.target.value)} />
             </div>
-            <div className="select-mini">ทุกหมวดหมู่</div>
+            <select className="select-mini" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+              <option value="">ทุกหมวดหมู่</option>
+              {activeCategoryNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <table className="data-table">

@@ -27,7 +27,10 @@ import {
   IconTransfer,
   IconPhone,
   IconPrint,
+  IconEdit,
+  IconCheck,
 } from '../icons.jsx';
+import Modal from '../components/Modal.jsx';
 import './ScrapPurchase.css';
 
 const PAY_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', promptpay: 'พร้อมเพย์' };
@@ -130,12 +133,27 @@ export default function ScrapPurchase() {
   const [printSnapshot, setPrintSnapshot] = useState(null);
   const noteRef = useRef(null);
 
-  const [draft, setDraft] = usePersistentState('scrapshop_purchase_draft', null);
-
-  // Restore a saved draft once on mount, but only into an otherwise-empty form so it
-  // never clobbers a purchase already being entered (e.g. after a route change/refresh).
+  // Auto-close the print preview modal once the browser's own print dialog is dismissed
+  // (printed or cancelled) — 'afterprint' fires either way, so the cashier isn't left having
+  // to manually close a preview that already did its job the moment they printed or backed out.
   useEffect(() => {
-    if (!draft || rows.length > 0 || selectedCustomer) return;
+    function handleAfterPrint() {
+      setPrintSnapshot(null);
+    }
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => window.removeEventListener('afterprint', handleAfterPrint);
+  }, []);
+
+  const [draft, setDraft] = usePersistentState('scrapshop_purchase_draft', null);
+  // A saved draft used to get pulled silently into the form the moment this page loaded —
+  // now it's reviewed in a modal first (see the "มีฉบับร่างที่บันทึกไว้" banner below), so it
+  // can't ever clobber a purchase already being entered, and the cashier gets to see and edit
+  // what's in it before committing to it instead of being surprised by whatever it contained.
+  const [showDraftModal, setShowDraftModal] = useState(false);
+  const hasUnreviewedDraft = !!draft && rows.length === 0 && !selectedCustomer;
+
+  function applyDraft() {
+    if (!draft) return;
     if (draft.selectedCustomer) setSelectedCustomer(draft.selectedCustomer);
     if (draft.rows?.length) {
       setRows(
@@ -150,9 +168,19 @@ export default function ScrapPurchase() {
     if (draft.deductionReasonId) setDeductionReasonId(draft.deductionReasonId);
     if (draft.customReason) setCustomReason(draft.customReason);
     if (draft.payMethod) setPayMethod(draft.payMethod);
-    setBanner({ type: 'info', text: `กู้คืนฉบับร่างที่บันทึกไว้เมื่อ ${draft.savedAt} แล้ว` });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    setShowDraftModal(false);
+    setBanner({ type: 'success', text: `นำฉบับร่างที่บันทึกไว้เมื่อ ${draft.savedAt} เข้าฟอร์มแล้ว` });
+  }
+
+  function discardDraft() {
+    setDraft(null);
+    setShowDraftModal(false);
+    setBanner({ type: 'info', text: 'ละทิ้งฉบับร่างแล้ว' });
+  }
+
+  function updateDraftRow(i, field, value) {
+    setDraft((d) => ({ ...d, rows: d.rows.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)) }));
+  }
 
   const filteredCustomers = useMemo(() => {
     const q = custQuery.trim().toLowerCase();
@@ -343,7 +371,7 @@ export default function ScrapPurchase() {
       customReason,
       payMethod,
     });
-    setBanner({ type: 'success', text: 'บันทึกฉบับร่างเรียบร้อยแล้ว — ระบบจะดึงกลับมาให้อัตโนมัติเมื่อเปิดหน้านี้ครั้งถัดไป' });
+    setBanner({ type: 'success', text: 'บันทึกฉบับร่างเรียบร้อยแล้ว — ครั้งถัดไปที่เปิดหน้านี้จะมีให้ตรวจสอบก่อนนำเข้าฟอร์ม' });
   }
 
   async function handleSubmit() {
@@ -358,7 +386,11 @@ export default function ScrapPurchase() {
     const receiptNo = 'RC' + Date.now().toString().slice(-9);
     const user = getStoredAuth();
     const timeStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
-    setPrintSnapshot({
+    // Built ahead of the actual save so the try block below can show it immediately once
+    // addReceipt succeeds — but NOT shown to the user until then. Setting printSnapshot before
+    // a save that can still fail would pop up a "receipt" (printable, reprintable) for a sale
+    // that was never actually recorded, right alongside the error banner from the catch below.
+    const snapshot = {
       no: receiptNo,
       time: timeStr,
       date: todayThaiDate(),
@@ -380,7 +412,7 @@ export default function ScrapPurchase() {
       grandTotal,
       payMethod,
       note: note.trim(),
-    });
+    };
     try {
       await addReceipt({
         no: receiptNo,
@@ -426,26 +458,31 @@ export default function ScrapPurchase() {
         // Which deduction reasons this receipt actually incremented usage on, and by how much —
         // voiding the receipt needs this to call decrementUsage the same number of times with
         // the same amounts, or the reason's "ใช้แล้ว N ครั้ง"/ยอดหักรวม would stay inflated forever.
+        // The amount tracked is the WEIGHT deducted (กก.), never money — "หักน้ำหนัก/เหตุผล"
+        // deducts weight directly, so a reason's cumulative total must stay in the same unit
+        // instead of a price-dependent money figure that has no fixed relationship to it.
         deductionUsage: [
-          ...(deductionReasonId && overallDeductionWeight > 0 ? [{ id: deductionReasonId, amount: overallDeductionMoney }] : []),
+          ...(deductionReasonId && overallDeductionWeight > 0 ? [{ id: deductionReasonId, amount: overallDeductionWeight }] : []),
           ...rows
             .filter((r) => r.deductionReasonId && rowDeductionWeight(r) > 0)
-            .map((r) => ({ id: r.deductionReasonId, amount: rowDeductionMoney(r) })),
+            .map((r) => ({ id: r.deductionReasonId, amount: rowDeductionWeight(r) })),
         ],
       });
     } catch (err) {
       setBanner({ type: 'error', text: err.message });
       return;
     }
+    setPrintSnapshot(snapshot);
     // Record real usage against each deduction reason actually applied on this receipt —
-    // both the overall reason and any per-row reasons — so the "ใช้แล้ว N ครั้ง" / total
-    // figures on the หักน้ำหนัก/เหตุผล page reflect real activity, not frozen seed numbers.
+    // both the overall reason and any per-row reasons — so the "ใช้แล้ว N ครั้ง" / ยอดหักรวม
+    // figures on the หักน้ำหนัก/เหตุผล page reflect real weight-deducted activity, not frozen
+    // seed numbers or a money-equivalent that drifts from the weight as prices change.
     if (deductionReasonId && overallDeductionWeight > 0) {
-      incrementUsage(deductionReasonId, overallDeductionMoney);
+      incrementUsage(deductionReasonId, overallDeductionWeight);
     }
     for (const r of rows) {
       if (r.deductionReasonId && rowDeductionWeight(r) > 0) {
-        incrementUsage(r.deductionReasonId, rowDeductionMoney(r));
+        incrementUsage(r.deductionReasonId, rowDeductionWeight(r));
       }
     }
     // Update the customer's real cumulative weight/spend/visit history, and add the net
@@ -493,6 +530,95 @@ export default function ScrapPurchase() {
             <IconX />
           </button>
         </div>
+      )}
+
+      {hasUnreviewedDraft && (
+        <div className="page-banner banner-info">
+          <span>มีฉบับร่างที่บันทึกไว้เมื่อ {draft.savedAt}</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="btn btn-ghost" style={{ padding: '5px 12px' }} onClick={() => setShowDraftModal(true)}>
+              <IconEdit style={{ width: 14, height: 14 }} />
+              แก้ไขฉบับร่าง
+            </button>
+            <button type="button" className="btn btn-ghost" style={{ padding: '5px 12px' }} onClick={discardDraft}>
+              <IconTrash style={{ width: 14, height: 14 }} />
+              ละทิ้งฉบับร่าง
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showDraftModal && draft && (
+        <Modal title="แก้ไขฉบับร่างก่อนนำเข้า" onClose={() => setShowDraftModal(false)}>
+          <div className="paper edit-mode">
+            <div className="field">
+              <label>ลูกค้า</label>
+              <div className="input-plain" style={{ background: 'var(--bg)', cursor: 'default' }}>
+                {draft.selectedCustomer?.name || 'ลูกค้าขาจร (ยังไม่ได้เลือก)'}
+              </div>
+            </div>
+
+            <div className="field">
+              <label>รายการสินค้า</label>
+              {(!draft.rows || draft.rows.length === 0) && <div className="empty-hint">ยังไม่มีรายการสินค้าในฉบับร่างนี้</div>}
+              {(draft.rows || []).map((r, i) => (
+                <div className="edit-item-row" key={i}>
+                  <input className="input-plain" placeholder="ชื่อสินค้า" value={r.name} onChange={(e) => updateDraftRow(i, 'name', e.target.value)} />
+                  <div className="edit-item-sub">
+                    <input
+                      className="input-plain"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="น้ำหนัก กก."
+                      value={r.weight}
+                      onChange={(e) => updateDraftRow(i, 'weight', e.target.value)}
+                    />
+                    <input
+                      className="input-plain"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="ราคา/กก."
+                      value={r.price}
+                      onChange={(e) => updateDraftRow(i, 'price', e.target.value)}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="field">
+              <label>หมายเหตุ</label>
+              <input className="input-plain" value={draft.note || ''} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
+            </div>
+
+            <div className="field">
+              <label>วิธีจ่ายเงิน</label>
+              <select className="input-plain" value={draft.payMethod || 'cash'} onChange={(e) => setDraft((d) => ({ ...d, payMethod: e.target.value }))}>
+                <option value="cash">เงินสด</option>
+                <option value="transfer">โอนเงิน</option>
+                <option value="promptpay">พร้อมเพย์</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="receipt-actions">
+            <button type="button" className="btn btn-primary btn-block" onClick={applyDraft}>
+              <IconCheck />
+              นำเข้าฟอร์ม
+            </button>
+            <div className="action-row">
+              <button type="button" className="btn btn-ghost btn-block" onClick={() => setShowDraftModal(false)}>
+                ปิด
+              </button>
+              <button type="button" className="btn btn-danger-ghost btn-block" onClick={discardDraft}>
+                <IconTrash />
+                ละทิ้งฉบับร่าง
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       <div className="grid">
@@ -871,7 +997,7 @@ export default function ScrapPurchase() {
       </div>
 
       {printSnapshot && (
-        <div className="hidden-until-print">
+        <Modal title={`ใบเสร็จ ${printSnapshot.no}`} onClose={() => setPrintSnapshot(null)}>
           <div className="paper">
             <div className="paper-top">
               <div className="paper-shop">{settings.shopName}</div>
@@ -958,7 +1084,17 @@ export default function ScrapPurchase() {
               {settings.receiptFooter}
             </div>
           </div>
-        </div>
+
+          <div className="receipt-actions">
+            <button type="button" className="btn btn-primary btn-block" onClick={() => window.print()}>
+              <IconPrint />
+              พิมพ์อีกครั้ง
+            </button>
+            <button type="button" className="btn btn-ghost btn-block" onClick={() => setPrintSnapshot(null)}>
+              ปิด
+            </button>
+          </div>
+        </Modal>
       )}
     </>
   );

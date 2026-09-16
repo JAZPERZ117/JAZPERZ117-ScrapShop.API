@@ -101,6 +101,14 @@ export default function Customers() {
     }
   }
 
+  // Selecting a different row must close any edit form left open on the previous one —
+  // otherwise its stale editName/editPhone/etc. stay bound to whatever id selectedId moves
+  // to next, and saving would overwrite the newly-selected customer with the old one's data.
+  function selectCustomer(id) {
+    setSelectedId(id);
+    setEditOpen(false);
+  }
+
   function openEdit(id = selectedId) {
     const target = customers[id];
     setSelectedId(id);
@@ -138,6 +146,7 @@ export default function Customers() {
       await deleteCustomer(id);
       const remaining = order.filter((oid) => oid !== id);
       if (id === selectedId && remaining[0]) setSelectedId(remaining[0]);
+      setEditOpen(false);
       setBanner({ type: 'error', text: `ลบข้อมูลลูกค้า "${target.name}" แล้ว` });
     } catch (err) {
       setBanner({ type: 'error', text: err.message });
@@ -279,7 +288,7 @@ export default function Customers() {
               {rows.map((id) => {
                 const cu = customers[id];
                 return (
-                  <tr key={id} className={`clickable${id === selectedId ? ' selected-row' : ''}`} onClick={() => setSelectedId(id)}>
+                  <tr key={id} className={`clickable${id === selectedId ? ' selected-row' : ''}`} onClick={() => selectCustomer(id)}>
                     <td>
                       <div className="row-cell">
                         <div className="row-icon" style={{ background: cu.bg, color: cu.fg, borderRadius: '99px' }}>
@@ -490,7 +499,7 @@ export default function Customers() {
                 style={{ cursor: 'pointer' }}
                 role="button"
                 tabIndex={0}
-                onClick={() => setSelectedId(id)}
+                onClick={() => selectCustomer(id)}
               >
                 <span>{customers[id].name}</span>
                 <span className="n">{customers[id].idDaysLeft < 0 ? `หมดอายุแล้ว ${Math.abs(customers[id].idDaysLeft)} วัน` : `${customers[id].idDaysLeft} วัน`}</span>

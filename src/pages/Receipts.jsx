@@ -19,6 +19,7 @@ import {
   IconEdit,
 } from '../icons.jsx';
 import RowMenu from '../components/RowMenu.jsx';
+import Modal from '../components/Modal.jsx';
 import './Receipts.css';
 
 function parseMoney(s) {
@@ -216,19 +217,19 @@ export default function Receipts() {
     scrollToPreview();
   }
 
+  // Used to be two separate buttons ("พิมพ์ใบเสร็จ" / "ดาวน์โหลด PDF") that both did exactly
+  // this — window.print() lets the user pick a real printer or "Save as PDF" either way.
+  // Splitting it in two meant a second window.print() call shortly after the first could get
+  // silently ignored by the browser's own popup/print-dialog throttling (Chrome does this to
+  // stop pages from spamming print dialogs) — the banner below would still show since the rest
+  // of the function ran fine, but no dialog ever appeared, which looked like "the button is
+  // broken" with nothing in the console to explain why. One button removes the chance of that
+  // ever happening from this page.
   function handlePrint() {
     setPrintedIds((prev) => (prev.includes(selectedId) ? prev : [...prev, selectedId]));
     setPrintLog((prev) => [...prev, new Date().toISOString()]);
-    logActivity(`พิมพ์ซ้ำ ${selected.no}`);
-    setBanner({ type: 'success', text: `ส่งพิมพ์ใบเสร็จ ${selected.no} ไปยังเครื่องพิมพ์แล้ว` });
-    window.print();
-  }
-
-  function handleDownloadPdf() {
-    setPrintedIds((prev) => (prev.includes(selectedId) ? prev : [...prev, selectedId]));
-    setPrintLog((prev) => [...prev, new Date().toISOString()]);
-    logActivity(`ดาวน์โหลด PDF ${selected.no}`);
-    setBanner({ type: 'success', text: `เปิดหน้าต่างพิมพ์ใบเสร็จ ${selected.no} แล้ว — เลือก "บันทึกเป็น PDF" เพื่อดาวน์โหลด` });
+    logActivity(`พิมพ์ใบเสร็จ ${selected.no}`);
+    setBanner({ type: 'success', text: `เปิดหน้าต่างพิมพ์ใบเสร็จ ${selected.no} แล้ว — เลือกเครื่องพิมพ์ หรือ "บันทึกเป็น PDF" เพื่อดาวน์โหลด` });
     window.print();
   }
 
@@ -281,8 +282,10 @@ export default function Receipts() {
       deductionWeight: deductionWeight.toFixed(2),
       deductionLabel: r.deductionLabel || '',
     });
+    // No scrollToPreview() here — the edit form now opens as a fixed-position modal (see
+    // Modal.jsx), so it's already fully visible regardless of scroll position or viewport
+    // width, unlike when it used to swap in over the side panel in place.
     setIsEditing(true);
-    scrollToPreview();
   }
 
   function cancelEdit() {
@@ -581,92 +584,23 @@ export default function Receipts() {
               <div className="receipt-title-row">
                 <div className="card-title">
                   <IconReceipt />
-                  {isEditing ? `แก้ไขใบเสร็จ ${receipts[editForm.id]?.no}` : 'ตัวอย่างใบเสร็จ'}
+                  ตัวอย่างใบเสร็จ
                 </div>
-                {!isEditing &&
-                  (selectedStatus === 'ok' ? (
-                    <span className="badge badge-green">
-                      <IconCheck />
-                      ปกติ
-                    </span>
-                  ) : (
-                    <span className="badge badge-rose">
-                      <IconX />
-                      ยกเลิก
-                    </span>
-                  ))}
+                {selectedStatus === 'ok' ? (
+                  <span className="badge badge-green">
+                    <IconCheck />
+                    ปกติ
+                  </span>
+                ) : (
+                  <span className="badge badge-rose">
+                    <IconX />
+                    ยกเลิก
+                  </span>
+                )}
               </div>
             </div>
 
-            {isEditing ? (
-              <div className="paper edit-mode">
-                <div className="field">
-                  <label>ชื่อลูกค้า</label>
-                  <input className="input-plain" value={editForm.cust} onChange={(e) => setEditForm((f) => ({ ...f, cust: e.target.value }))} />
-                </div>
-                <div className="field">
-                  <label>วิธีจ่ายเงิน</label>
-                  <select className="input-plain" value={editForm.method} onChange={(e) => setEditForm((f) => ({ ...f, method: e.target.value }))}>
-                    <option>เงินสด</option>
-                    <option>โอนเงิน</option>
-                    <option>พร้อมเพย์</option>
-                  </select>
-                </div>
-
-                <div className="field">
-                  <label>รายการสินค้า</label>
-                  {editForm.items.map((it, i) => (
-                    <div className="edit-item-row" key={i}>
-                      <input className="input-plain" placeholder="ชื่อสินค้า" value={it.name} onChange={(e) => updateEditItem(i, 'name', e.target.value)} />
-                      <div className="edit-item-sub">
-                        <input className="input-plain" type="number" min="0" step="0.01" placeholder="น้ำหนัก กก." value={it.weight} onChange={(e) => updateEditItem(i, 'weight', e.target.value)} />
-                        <input className="input-plain" type="number" min="0" step="0.01" placeholder="ราคา/กก." value={it.price} onChange={(e) => updateEditItem(i, 'price', e.target.value)} />
-                        <button type="button" className="edit-item-remove" onClick={() => removeEditItem(i)} disabled={editForm.items.length <= 1} title="ลบรายการนี้">
-                          <IconTrash />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <button type="button" className="btn btn-ghost btn-block" onClick={addEditItem}>
-                    <IconPlus />
-                    เพิ่มรายการ
-                  </button>
-                </div>
-
-                <div className="field-row">
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>หักน้ำหนักรวม (กก.)</label>
-                    <input
-                      className="input-plain"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={editForm.deductionWeight}
-                      onChange={(e) => setEditForm((f) => ({ ...f, deductionWeight: e.target.value }))}
-                    />
-                  </div>
-                  <div className="field" style={{ flex: 1 }}>
-                    <label>เหตุผลที่หัก (ไม่บังคับ)</label>
-                    <input className="input-plain" value={editForm.deductionLabel} onChange={(e) => setEditForm((f) => ({ ...f, deductionLabel: e.target.value }))} />
-                  </div>
-                </div>
-
-                <div className="field">
-                  <label>หมายเหตุ</label>
-                  <input className="input-plain" value={editForm.note} onChange={(e) => setEditForm((f) => ({ ...f, note: e.target.value }))} />
-                </div>
-
-                <div className="paper-meta">
-                  <span>น้ำหนักรวม</span>
-                  <b>{editTotalWeight.toFixed(2)} กก.</b>
-                </div>
-                <div className="paper-total-row">
-                  <span className="l">ยอดรวมสุทธิ (คำนวณใหม่)</span>
-                  <span className="v">{money(editGrandTotal)}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="paper">
+            <div className="paper">
                 <div className="paper-top">
                   <div className="paper-shop">{settings.shopName}</div>
                   <div className="paper-addr">
@@ -741,9 +675,94 @@ export default function Receipts() {
                   {settings.receiptFooter}
                 </div>
               </div>
-            )}
 
-            {isEditing ? (
+            <div className="receipt-actions">
+              <button type="button" className="btn btn-primary btn-block" onClick={handlePrint}>
+                <IconPrint />
+                พิมพ์ / บันทึกเป็น PDF
+              </button>
+              <button type="button" className="btn btn-ghost btn-block" onClick={() => startEdit()} disabled={selectedStatus === 'void'}>
+                <IconEdit />
+                แก้ไขใบเสร็จ
+              </button>
+              <button type="button" className="btn btn-danger-ghost btn-block" onClick={() => handleVoid()} disabled={selectedStatus === 'void'}>
+                <IconTrash />
+                ยกเลิกใบเสร็จ
+              </button>
+            </div>
+              </>
+            )}
+          </div>
+
+          {isEditing && (
+            <Modal title={`แก้ไขใบเสร็จ ${receipts[editForm.id]?.no}`} onClose={cancelEdit} maxWidth={640}>
+              <div className="paper edit-mode">
+                <div className="field">
+                  <label>ชื่อลูกค้า</label>
+                  <input className="input-plain" value={editForm.cust} onChange={(e) => setEditForm((f) => ({ ...f, cust: e.target.value }))} />
+                </div>
+                <div className="field">
+                  <label>วิธีจ่ายเงิน</label>
+                  <select className="input-plain" value={editForm.method} onChange={(e) => setEditForm((f) => ({ ...f, method: e.target.value }))}>
+                    <option>เงินสด</option>
+                    <option>โอนเงิน</option>
+                    <option>พร้อมเพย์</option>
+                  </select>
+                </div>
+
+                <div className="field">
+                  <label>รายการสินค้า</label>
+                  {editForm.items.map((it, i) => (
+                    <div className="edit-item-row" key={i}>
+                      <input className="input-plain" placeholder="ชื่อสินค้า" value={it.name} onChange={(e) => updateEditItem(i, 'name', e.target.value)} />
+                      <div className="edit-item-sub">
+                        <input className="input-plain" type="number" min="0" step="0.01" placeholder="น้ำหนัก กก." value={it.weight} onChange={(e) => updateEditItem(i, 'weight', e.target.value)} />
+                        <input className="input-plain" type="number" min="0" step="0.01" placeholder="ราคา/กก." value={it.price} onChange={(e) => updateEditItem(i, 'price', e.target.value)} />
+                        <button type="button" className="edit-item-remove" onClick={() => removeEditItem(i)} disabled={editForm.items.length <= 1} title="ลบรายการนี้">
+                          <IconTrash />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <button type="button" className="btn btn-ghost btn-block" onClick={addEditItem}>
+                    <IconPlus />
+                    เพิ่มรายการ
+                  </button>
+                </div>
+
+                <div className="field-row">
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>หักน้ำหนักรวม (กก.)</label>
+                    <input
+                      className="input-plain"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={editForm.deductionWeight}
+                      onChange={(e) => setEditForm((f) => ({ ...f, deductionWeight: e.target.value }))}
+                    />
+                  </div>
+                  <div className="field" style={{ flex: 1 }}>
+                    <label>เหตุผลที่หัก (ไม่บังคับ)</label>
+                    <input className="input-plain" value={editForm.deductionLabel} onChange={(e) => setEditForm((f) => ({ ...f, deductionLabel: e.target.value }))} />
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label>หมายเหตุ</label>
+                  <input className="input-plain" value={editForm.note} onChange={(e) => setEditForm((f) => ({ ...f, note: e.target.value }))} />
+                </div>
+
+                <div className="paper-meta">
+                  <span>น้ำหนักรวม</span>
+                  <b>{editTotalWeight.toFixed(2)} กก.</b>
+                </div>
+                <div className="paper-total-row">
+                  <span className="l">ยอดรวมสุทธิ (คำนวณใหม่)</span>
+                  <span className="v">{money(editGrandTotal)}</span>
+                </div>
+              </div>
+
               <div className="receipt-actions">
                 <button type="button" className="btn btn-primary btn-block" onClick={saveEdit}>
                   <IconCheck />
@@ -754,31 +773,8 @@ export default function Receipts() {
                   ยกเลิกการแก้ไข
                 </button>
               </div>
-            ) : (
-              <div className="receipt-actions">
-                <button type="button" className="btn btn-primary btn-block" onClick={handlePrint}>
-                  <IconPrint />
-                  พิมพ์ใบเสร็จ
-                </button>
-                <div className="action-row">
-                  <button type="button" className="btn btn-ghost" onClick={handleDownloadPdf}>
-                    <IconDownload />
-                    ดาวน์โหลด PDF
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => startEdit()} disabled={selectedStatus === 'void'}>
-                    <IconEdit />
-                    แก้ไขใบเสร็จ
-                  </button>
-                </div>
-                <button type="button" className="btn btn-danger-ghost btn-block" onClick={() => handleVoid()} disabled={selectedStatus === 'void'}>
-                  <IconTrash />
-                  ยกเลิกใบเสร็จ
-                </button>
-              </div>
-            )}
-              </>
-            )}
-          </div>
+            </Modal>
+          )}
 
           <div className="card mini-stat-card">
             <div className="mini-stat-title">
