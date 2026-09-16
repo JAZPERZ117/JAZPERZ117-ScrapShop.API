@@ -16,6 +16,31 @@ function parseWeightKg(w) {
   return parseFloat(String(w).replace(/[^\d.]/g, '')) || 0;
 }
 
+// `it.w` is a display string for the printed receipt ("5.00 กก. × ฿10.00", or with a
+// per-row deduction shown, "5.00 − 1.00 = 4.00 กก. × ฿10.00") — never a bare number, so
+// parseWeightKg's blind digit-stripping concatenates the weight and price into garbage
+// (e.g. "5.0010.00" parses as 5.001). Prefer the clean `netWeight` number stored alongside
+// it on receipts created after this fix; fall back to pulling it back out of the display
+// string the same way Receipts.jsx's parseItemNetWeight does, for older receipts.
+function parseItemNetWeight(it) {
+  if (typeof it.netWeight === 'number') return it.netWeight;
+  const w = it.w || '';
+  const afterEquals = w.includes('=') ? w.split('=')[1] : w;
+  const match = afterEquals.match(/([\d,]+\.?\d*)\s*กก\./);
+  return match ? parseFloat(match[1].replace(/,/g, '')) || 0 : 0;
+}
+
+// A receipt's item totals (`it.t`) only ever have that item's own row-level deduction
+// subtracted — the receipt's separate "หักน้ำหนักรวม" blanket deduction is subtracted once
+// from the whole receipt (see receipts[id].total), never allocated back onto individual
+// items. Summing raw it.t across a receipt's items therefore overstates revenue by exactly
+// that blanket deduction whenever one was used. Scale each item's amount down so a receipt's
+// items sum to its own correct, already-net total, before aggregating across receipts.
+function receiptItemScale(r) {
+  const itemsSum = (r.items || []).reduce((s, it) => s + parseMoney(it.t), 0);
+  return itemsSum > 0 ? parseMoney(r.total) / itemsSum : 1;
+}
+
 function money(n) {
   return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -83,12 +108,14 @@ export default function DailySummary() {
   const categoryRows = useMemo(() => {
     const byCat = {};
     for (const id of activeReceipts) {
-      for (const it of receipts[id].items || []) {
+      const r = receipts[id];
+      const scale = receiptItemScale(r);
+      for (const it of r.items || []) {
         const product = Object.values(products).find((p) => p.name === it.n);
         const cat = product?.cat || 'อื่นๆ';
         if (!byCat[cat]) byCat[cat] = { weight: 0, amt: 0, Icon: product?.Icon, bg: product?.bg || 'var(--bg)', fg: product?.fg || 'var(--ink-500)' };
-        byCat[cat].weight += parseWeightKg(it.w);
-        byCat[cat].amt += parseMoney(it.t);
+        byCat[cat].weight += parseItemNetWeight(it);
+        byCat[cat].amt += parseMoney(it.t) * scale;
       }
     }
     const total = Object.values(byCat).reduce((s, c) => s + c.amt, 0) || 1;
@@ -100,8 +127,10 @@ export default function DailySummary() {
   const topProducts = useMemo(() => {
     const byName = {};
     for (const id of activeReceipts) {
-      for (const it of receipts[id].items || []) {
-        byName[it.n] = (byName[it.n] || 0) + parseMoney(it.t);
+      const r = receipts[id];
+      const scale = receiptItemScale(r);
+      for (const it of r.items || []) {
+        byName[it.n] = (byName[it.n] || 0) + parseMoney(it.t) * scale;
       }
     }
     return Object.entries(byName).sort((a, b) => b[1] - a[1]).slice(0, 4);

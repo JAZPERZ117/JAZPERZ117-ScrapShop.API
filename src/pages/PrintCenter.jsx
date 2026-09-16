@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   IconPrint,
   IconRefresh,
@@ -162,6 +162,17 @@ export default function PrintCenter() {
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState(customerOrder[0]);
   const [taxForm, setTaxForm] = useState('90');
+  // Receipts/Customers now load asynchronously from the server, so `receiptOrder`/
+  // `customerOrder` are still empty on the very first render — the two `useState(...[0])`
+  // calls above only run once and capture undefined. Without this, renderReceiptDoc()/
+  // renderIdcardDoc() silently return null forever while "พิมพ์เอกสารนี้" stays enabled,
+  // same fix already applied to Products.jsx/Categories.jsx for this exact async-load race.
+  useEffect(() => {
+    if (!selectedReceiptId && receiptOrder.length > 0) setSelectedReceiptId(receiptOrder[0]);
+  }, [receiptOrder, selectedReceiptId]);
+  useEffect(() => {
+    if (!selectedCustomerId && customerOrder.length > 0) setSelectedCustomerId(customerOrder[0]);
+  }, [customerOrder, selectedCustomerId]);
 
   const d = DOCS[selectedId];
   const receiptPrintCount = printLog.filter((l) => l.icon === 'receipt').length;

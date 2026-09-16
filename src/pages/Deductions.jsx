@@ -5,10 +5,6 @@ import { IconDeduct, IconDownload, IconPlus, IconCheck, IconEdit, IconClockHisto
 import RowMenu from '../components/RowMenu.jsx';
 import './Deductions.css';
 
-function money(n) {
-  return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
 export default function Deductions() {
   const { reasons, order, createReason, updateReason, deleteReason } = useDeductions();
   const totalUsesThisMonth = order.reduce((sum, id) => sum + (reasons[id].uses || 0), 0);
@@ -74,7 +70,7 @@ export default function Deductions() {
   function handleExport() {
     exportCsv(
       'deduction-reasons.csv',
-      ['เหตุผล', 'ประเภท', 'ค่าเริ่มต้น', 'ใช้แล้วสะสม', 'ยอดหักรวม', 'สถานะ'],
+      ['เหตุผล', 'ประเภท', 'ค่าเริ่มต้น', 'ใช้แล้วสะสม', 'ยอดหักรวม (กก.)', 'สถานะ'],
       rows.map((id) => {
         const item = reasons[id];
         return [item.name, item.type === 'percent' ? 'เปอร์เซ็นต์' : 'คงที่', item.value, item.uses || 0, (item.total || 0).toFixed(2), item.active ? 'ใช้งาน' : 'ปิดใช้งาน'];
@@ -211,7 +207,7 @@ export default function Deductions() {
           </div>
           <div>
             <div className="stat-label">ยอดหักรวมสะสม</div>
-            <div className="stat-value">−{money(totalDeductedThisMonth)}</div>
+            <div className="stat-value">−{totalDeductedThisMonth.toFixed(2)} กก.</div>
             <div className="stat-foot">รวม {totalUsesThisMonth} ครั้งที่หัก</div>
           </div>
         </div>
@@ -332,7 +328,7 @@ export default function Deductions() {
               </div>
               <div className="mini-stat-box">
                 <div className="lbl">ยอดหักรวม</div>
-                <div className="v">−{money(r.total)}</div>
+                <div className="v">−{(r.total || 0).toFixed(2)} กก.</div>
               </div>
             </div>
 
