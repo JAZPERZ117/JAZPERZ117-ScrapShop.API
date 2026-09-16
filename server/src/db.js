@@ -269,4 +269,24 @@ db.exec(`
   );
 `);
 
+// Shop-wide settings (shop info printed on receipts, login security toggles) used to live only
+// in each browser's own localStorage — updating the receipt footer or shop address on one device
+// never showed up on any receipt printed from another till. A single fixed row (id 'shop')
+// rather than a key/value table, since this app only ever has exactly one shop's settings.
+// `theme` (light/dark UI mode) is deliberately NOT here — it's a per-device display preference,
+// kept in that browser's own localStorage, not synced.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
+    id TEXT PRIMARY KEY,
+    shop_name TEXT NOT NULL DEFAULT '',
+    tax_id TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    hours TEXT NOT NULL DEFAULT '',
+    receipt_footer TEXT NOT NULL DEFAULT '',
+    remember30 INTEGER NOT NULL DEFAULT 1,
+    pin_login INTEGER NOT NULL DEFAULT 1
+  );
+`);
+
 module.exports = db;

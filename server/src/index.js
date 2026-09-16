@@ -1165,6 +1165,46 @@ app.post('/api/scales-activity', requireAuth, (req, res) => {
   res.status(201).json({ activity: rows.map((r) => ({ icon: r.icon, title: r.title, sub: r.sub, amt: r.amt })) });
 });
 
+function toApiSettings(row) {
+  return {
+    shopName: row.shop_name,
+    taxId: row.tax_id,
+    address: row.address,
+    phone: row.phone,
+    hours: row.hours,
+    receiptFooter: row.receipt_footer,
+    remember30: !!row.remember30,
+    pinLogin: !!row.pin_login,
+  };
+}
+
+// Unlike every other resource, this is deliberately NOT behind requireAuth: Login.jsx reads
+// shop hours and whether PIN login is enabled before anyone has signed in, and none of these
+// fields are sensitive — they're the same shop name/address/hours already printed on every
+// receipt a customer takes home. Writing them still requires being signed in as the owner below.
+app.get('/api/settings', (req, res) => {
+  const row = db.prepare("SELECT * FROM settings WHERE id = 'shop'").get();
+  res.json({ settings: toApiSettings(row) });
+});
+
+app.put('/api/settings', requireAuth, requireOwner, (req, res) => {
+  const row = db.prepare("SELECT * FROM settings WHERE id = 'shop'").get();
+  const b = req.body || {};
+  db.prepare(
+    `UPDATE settings SET shop_name = ?, tax_id = ?, address = ?, phone = ?, hours = ?, receipt_footer = ?, remember30 = ?, pin_login = ? WHERE id = 'shop'`
+  ).run(
+    b.shopName !== undefined ? b.shopName : row.shop_name,
+    b.taxId !== undefined ? b.taxId : row.tax_id,
+    b.address !== undefined ? b.address : row.address,
+    b.phone !== undefined ? b.phone : row.phone,
+    b.hours !== undefined ? b.hours : row.hours,
+    b.receiptFooter !== undefined ? b.receiptFooter : row.receipt_footer,
+    b.remember30 !== undefined ? (b.remember30 ? 1 : 0) : row.remember30,
+    b.pinLogin !== undefined ? (b.pinLogin ? 1 : 0) : row.pin_login
+  );
+  res.json({ settings: toApiSettings(db.prepare("SELECT * FROM settings WHERE id = 'shop'").get()) });
+});
+
 // React Router handles routing client-side, so a direct link or hard refresh on e.g. /receipts
 // has to still get index.html from the server (there's no real /receipts file on disk) and let
 // the client-side router take over from there. Registered after every real route above, so it
