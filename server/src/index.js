@@ -578,6 +578,9 @@ function toApiReceipt(row) {
     total: row.total,
     deductionUsage: JSON.parse(row.deduction_usage || '[]'),
     voidedAt: row.voided_at,
+    slipPhoto: row.slip_photo || '',
+    vatIncluded: !!row.vat_included,
+    vatAmount: row.vat_amount || 0,
   };
 }
 
@@ -598,8 +601,8 @@ app.post('/api/receipts', requireAuth, (req, res) => {
     return res.status(409).json({ error: `เลขที่ใบเสร็จ ${b.no} ถูกใช้แล้ว` });
   }
   db.prepare(
-    `INSERT INTO receipts (no, date, time, cust, cust_id, issued_by, init, bg, fg, status, weight, deduction_weight, deduction_label, note, method, items, total, deduction_usage)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO receipts (no, date, time, cust, cust_id, issued_by, init, bg, fg, status, weight, deduction_weight, deduction_label, note, method, items, total, deduction_usage, slip_photo, vat_included, vat_amount)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     b.no,
     b.date || todayISO(),
@@ -618,7 +621,10 @@ app.post('/api/receipts', requireAuth, (req, res) => {
     b.method || '',
     JSON.stringify(b.items || []),
     b.total || '฿0.00',
-    JSON.stringify(b.deductionUsage || [])
+    JSON.stringify(b.deductionUsage || []),
+    b.slipPhoto || '',
+    b.vatIncluded ? 1 : 0,
+    b.vatAmount || 0
   );
   const row = db.prepare('SELECT * FROM receipts WHERE no = ?').get(b.no);
   res.status(201).json({ receipt: toApiReceipt(row) });

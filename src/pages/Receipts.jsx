@@ -648,6 +648,18 @@ export default function Receipts() {
                   <span>หักน้ำหนัก/เหตุผล{selected.deductionLabel ? ` (${selected.deductionLabel})` : ''}</span>
                   <b>−{(selected.deductionWeight || 0).toFixed(2)} กก.</b>
                 </div>
+                {selected.vatIncluded && (
+                  <>
+                    <div className="paper-meta">
+                      <span>ราคาก่อน VAT</span>
+                      <b>{money(parseMoney(selected.total) - (selected.vatAmount || 0))}</b>
+                    </div>
+                    <div className="paper-meta">
+                      <span>VAT 7% (รวมในราคาแล้ว)</span>
+                      <b>{money(selected.vatAmount || 0)}</b>
+                    </div>
+                  </>
+                )}
 
                 <div className="paper-total-row">
                   <span className="l">ยอดรวมสุทธิ</span>
@@ -675,6 +687,20 @@ export default function Receipts() {
                   {settings.receiptFooter}
                 </div>
               </div>
+
+            {selected.slipPhoto && (
+              // Shown here, not inside .paper above — this is the shop's own proof-of-payment
+              // record, not something that belongs on the customer's printed copy of the receipt.
+              <div className="slip-photo-view">
+                <span className="slip-photo-label">สลิปโอนเงิน</span>
+                <img
+                  src={selected.slipPhoto}
+                  alt="สลิปโอนเงิน"
+                  onClick={() => window.open(selected.slipPhoto, '_blank')}
+                  title="กดเพื่อดูขนาดเต็ม"
+                />
+              </div>
+            )}
 
             <div className="receipt-actions">
               <button type="button" className="btn btn-primary btn-block" onClick={handlePrint}>

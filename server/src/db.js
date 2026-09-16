@@ -117,6 +117,23 @@ db.exec(`
   );
 `);
 
+// Added after the table above shipped — a photo of the transfer slip when a purchase is paid
+// by โอนเงิน, so there's real proof of payment attached to the receipt itself instead of the
+// cashier having to separately keep track of which bank app screenshot went with which sale.
+const receiptColumns = db.prepare('PRAGMA table_info(receipts)').all().map((c) => c.name);
+if (!receiptColumns.includes('slip_photo')) {
+  db.exec("ALTER TABLE receipts ADD COLUMN slip_photo TEXT NOT NULL DEFAULT ''");
+}
+// Optional, per-receipt — the cashier can mark that `total` already includes 7% VAT (extracted
+// back out of the agreed price for display, not added on top of it — the seller is paid the
+// same `total` either way), so a receipt can be shown/printed with a proper VAT breakdown.
+if (!receiptColumns.includes('vat_included')) {
+  db.exec('ALTER TABLE receipts ADD COLUMN vat_included INTEGER NOT NULL DEFAULT 0');
+}
+if (!receiptColumns.includes('vat_amount')) {
+  db.exec('ALTER TABLE receipts ADD COLUMN vat_amount REAL NOT NULL DEFAULT 0');
+}
+
 // Deliveries (outbound shipments to buyers, with the stock they carry out) used to live only
 // in each browser's own localStorage. `no` (the delivery number, e.g. "DO123456789") is the
 // real primary key here, same as it already was as the object key in the old client-side
