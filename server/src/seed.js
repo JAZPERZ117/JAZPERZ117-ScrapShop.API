@@ -131,3 +131,21 @@ INITIAL_SCALES.forEach((s, i) => {
   ).run(s.id, s.name, s.model, s.bg, s.fg, s.port, s.conn, s.max, s.res, s.status, s.active, i);
   console.log(`สร้างเครื่องชั่งตั้งต้นสำเร็จ: ${s.name}`);
 });
+
+// Starting shop settings (see src/context/SettingsContext.jsx's old INITIAL_SETTINGS) — a
+// single fixed row, id 'shop', since this app only ever manages one shop's settings.
+const alreadySettings = db.prepare("SELECT id FROM settings WHERE id = 'shop'").get();
+if (!alreadySettings) {
+  db.prepare(
+    `INSERT INTO settings (id, shop_name, tax_id, address, phone, hours, receipt_footer, remember30, pin_login)
+     VALUES ('shop', ?, ?, ?, ?, ?, ?, 1, 1)`
+  ).run(
+    'ร้าน อ.อนงค์ค้าของเก่า',
+    '3-1009-XXXXX-XX-X',
+    '99/4 หมู่ 3 ต.เกาะเต่า อ.เกาะพะงัน จ.สุราษฎร์ธานี',
+    '077-456-789',
+    '08:00 – 17:30 น.',
+    'ขอบคุณที่ใช้บริการ · โปรดเก็บใบเสร็จไว้เป็นหลักฐาน'
+  );
+  console.log('สร้างค่าตั้งต้นของร้านสำเร็จ');
+}
