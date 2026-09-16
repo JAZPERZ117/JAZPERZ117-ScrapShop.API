@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { IconCalendarBars, IconDownload, IconPrint, IconCategory, IconUsers, IconCash, IconClockHistory } from '../icons.jsx';
 import { exportCsv } from '../lib/csvExport.js';
 import { useSettings } from '../context/SettingsContext.jsx';
@@ -17,18 +17,45 @@ function parseWeightKg(w) {
   return parseFloat(String(w).replace(/[^\d.]/g, '')) || 0;
 }
 
+// `it.w` is a display string ("5.00 กก. × ฿10.00", or with a row deduction shown, "5.00 −
+// 1.00 = 4.00 กก. × ฿10.00") — never a bare number, so parseWeightKg's blind digit-stripping
+// concatenates the weight and price into garbage (e.g. "5.0010.00" parses as 5.001). Prefer
+// the clean `netWeight` stored alongside it on receipts created after this fix; fall back to
+// pulling it back out of the display string, same as Receipts.jsx's parseItemNetWeight.
+function parseItemNetWeight(it) {
+  if (typeof it.netWeight === 'number') return it.netWeight;
+  const w = it.w || '';
+  const afterEquals = w.includes('=') ? w.split('=')[1] : w;
+  const match = afterEquals.match(/([\d,]+\.?\d*)\s*กก\./);
+  return match ? parseFloat(match[1].replace(/,/g, '')) || 0 : 0;
+}
+
+// A receipt's item totals (it.t) only ever have that item's own row-level deduction
+// subtracted — the receipt's separate "หักน้ำหนักรวม" blanket deduction is subtracted once
+// from the whole receipt (receipts[id].total), never allocated back onto items. Summing raw
+// it.t across a receipt's items overstates revenue by exactly that blanket deduction whenever
+// one was used. Scale each item down so a receipt's items sum to its own correct total.
+function receiptItemScale(r) {
+  const itemsSum = (r.items || []).reduce((s, it) => s + parseMoney(it.t), 0);
+  return itemsSum > 0 ? parseMoney(r.total) / itemsSum : 1;
+}
+
 function money(n) {
   return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function monthLabelBE(offset, style) {
-  const d = new Date();
-  d.setMonth(d.getMonth() - offset);
-  return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: style, year: 'numeric' }).format(d);
+// year/monthIndex (0-based) instead of an offset-from-real-today, so the page can show any
+// month the user picks via the date field, not just the current one.
+function monthLabelOf(year, monthIndex, style) {
+  return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: style, year: 'numeric' }).format(new Date(year, monthIndex, 1));
 }
-const THIS_MONTH_LONG = monthLabelBE(0, 'long');
-const THIS_MONTH_SHORT = monthLabelBE(0, 'short');
-const LAST_MONTH_SHORT = monthLabelBE(1, 'short');
+
+// Local, not UTC — matches ReceiptsContext.jsx's own todayISO(), which is what every
+// receipt's `date` field is actually stamped with.
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 function makeLineChart(seriesA, seriesB, labels) {
   const w = 640,
@@ -83,9 +110,17 @@ export default function MonthlyReport() {
   const { order: staffOrder, payHistory } = usePayroll();
 
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
+  // Which month this report shows — defaults to the real current month, but the date field
+  // below lets the user pick any past month to look up instead of only ever showing "now".
+  const [selectedMonth, setSelectedMonth] = useState(() => todayISO().slice(0, 7));
+  const [selYear, selMonth1] = selectedMonth.split('-').map(Number);
+  const THIS_MONTH_LONG = monthLabelOf(selYear, selMonth1 - 1, 'long');
+  const THIS_MONTH_SHORT = monthLabelOf(selYear, selMonth1 - 1, 'short');
+  const LAST_MONTH_SHORT = monthLabelOf(new Date(selYear, selMonth1 - 2, 1).getFullYear(), new Date(selYear, selMonth1 - 2, 1).getMonth(), 'short');
   // Real calendar-month scoping — receipts persist indefinitely, so without this "this
   // month" would silently become an all-time total once the shop's been running a while.
-  const now = new Date();
+  // `now` here represents the SELECTED month (day fixed at 1st), not necessarily today.
+  const now = new Date(selYear, selMonth1 - 1, 1);
   const monthActiveReceipts = activeReceipts.filter((id) => {
     const [y, m] = (receipts[id].date || '').split('-').map(Number);
     return y === now.getFullYear() && m === now.getMonth() + 1;
@@ -127,12 +162,14 @@ export default function MonthlyReport() {
   const categoryRows = useMemo(() => {
     const byCat = {};
     for (const id of monthActiveReceipts) {
-      for (const it of receipts[id].items || []) {
+      const r = receipts[id];
+      const scale = receiptItemScale(r);
+      for (const it of r.items || []) {
         const product = Object.values(products).find((p) => p.name === it.n);
         const cat = product?.cat || 'อื่นๆ';
         if (!byCat[cat]) byCat[cat] = { weight: 0, amt: 0, Icon: product?.Icon, bg: product?.bg || 'var(--bg)', fg: product?.fg || 'var(--ink-500)' };
-        byCat[cat].weight += parseWeightKg(it.w);
-        byCat[cat].amt += parseMoney(it.t);
+        byCat[cat].weight += parseItemNetWeight(it);
+        byCat[cat].amt += parseMoney(it.t) * scale;
       }
     }
     return Object.entries(byCat)
@@ -170,10 +207,16 @@ export default function MonthlyReport() {
           <div className="page-sub">แนวโน้มยอดรับซื้อ กำไร และเปรียบเทียบกับเดือนก่อนหน้า</div>
         </div>
         <div className="head-actions">
-          <div className="date-select">
+          <label className="date-select" style={{ cursor: 'pointer' }}>
             <IconClockHistory />
-            {THIS_MONTH_LONG}
-          </div>
+            <input
+              type="month"
+              value={selectedMonth}
+              max={todayISO().slice(0, 7)}
+              onChange={(e) => e.target.value && setSelectedMonth(e.target.value)}
+              style={{ border: 'none', background: 'transparent', font: 'inherit', color: 'inherit', padding: 0, cursor: 'pointer' }}
+            />
+          </label>
           <button type="button" className="btn btn-ghost" onClick={handleExport}>
             <IconDownload />
             ส่งออก Excel

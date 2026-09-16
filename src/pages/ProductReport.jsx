@@ -13,8 +13,27 @@ function parseMoney(s) {
   return parseFloat(String(s).replace(/[^\d.]/g, '')) || 0;
 }
 
-function parseWeightKg(w) {
-  return parseFloat(String(w).replace(/[^\d.]/g, '')) || 0;
+// `it.w` is a display string ("5.00 กก. × ฿10.00", or with a row deduction shown, "5.00 −
+// 1.00 = 4.00 กก. × ฿10.00") — never a bare number, so a naive digit-stripping parse would
+// concatenate the weight and price into garbage (e.g. "5.0010.00" parses as 5.001). Prefer
+// the clean `netWeight` stored alongside it on receipts created after this fix; fall back to
+// pulling it back out of the display string, same as Receipts.jsx's parseItemNetWeight.
+function parseItemNetWeight(it) {
+  if (typeof it.netWeight === 'number') return it.netWeight;
+  const w = it.w || '';
+  const afterEquals = w.includes('=') ? w.split('=')[1] : w;
+  const match = afterEquals.match(/([\d,]+\.?\d*)\s*กก\./);
+  return match ? parseFloat(match[1].replace(/,/g, '')) || 0 : 0;
+}
+
+// A receipt's item totals (it.t) only ever have that item's own row-level deduction
+// subtracted — the receipt's separate "หักน้ำหนักรวม" blanket deduction is subtracted once
+// from the whole receipt (receipts[id].total), never allocated back onto items. Summing raw
+// it.t across a receipt's items overstates revenue by exactly that blanket deduction whenever
+// one was used. Scale each item down so a receipt's items sum to its own correct total.
+function receiptItemScale(r) {
+  const itemsSum = (r.items || []).reduce((s, it) => s + parseMoney(it.t), 0);
+  return itemsSum > 0 ? parseMoney(r.total) / itemsSum : 1;
 }
 
 function parseStockKg(stock) {
@@ -48,10 +67,11 @@ export default function ProductReport() {
     for (const id of receiptOrder) {
       const r = receipts[id];
       if (r.status === 'void') continue;
+      const scale = receiptItemScale(r);
       for (const it of r.items || []) {
         if (!byName[it.n]) byName[it.n] = { amt: 0, weight: 0 };
-        byName[it.n].amt += parseMoney(it.t);
-        byName[it.n].weight += parseWeightKg(it.w);
+        byName[it.n].amt += parseMoney(it.t) * scale;
+        byName[it.n].weight += parseItemNetWeight(it);
       }
     }
     return byName;
@@ -95,7 +115,11 @@ export default function ProductReport() {
   // whichever price moved furthest in either direction.
   const topMover = [...productIds].sort((a, b) => Math.abs(parsePct(products[b].change)) - Math.abs(parsePct(products[a].change)))[0];
   const topMoverDir = topMover ? products[topMover].dir : 'flat';
-  const bestSeller = rank[0];
+  // Always by revenue, independent of the "ตามยอดเงิน"/"ตามน้ำหนัก" tabs below — those tabs
+  // only control the ranking table's sort order, but this stat card is explicitly labeled
+  // "สินค้าขายดีที่สุด" with a "฿... สะสม" revenue figure, so it must not silently swap to
+  // the highest-weight product just because the table underneath was re-sorted by weight.
+  const bestSeller = [...rank].sort((a, b) => b.amt - a.amt)[0];
 
   const risers = [...productIds].filter((id) => products[id].dir === 'up').sort((a, b) => parsePct(products[b].change) - parsePct(products[a].change)).slice(0, 3);
   const fallers = [...productIds].filter((id) => products[id].dir === 'down').sort((a, b) => parsePct(products[a].change) - parsePct(products[b].change)).slice(0, 3);

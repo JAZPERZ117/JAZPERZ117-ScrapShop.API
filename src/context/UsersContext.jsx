@@ -4,6 +4,14 @@ import { getToken } from '../lib/auth.js';
 
 export const ROLES = ['เจ้าของร้าน', 'ผู้จัดการ', 'แคชเชียร์', 'พนักงานชั่งของ'];
 
+// The server seeds the admin account's role as the literal English string 'owner' (it's what
+// requireOwner checks on the backend) — merged straight through, it would render as the raw
+// word "owner" in this all-Thai UI, and wouldn't match any <option> in the role <select>,
+// which only offers the four ROLES strings above.
+function displayRole(serverRole) {
+  return serverRole === 'owner' ? 'เจ้าของร้าน' : serverRole;
+}
+
 // "admin" is the only account with a real backend login (username/password against the
 // SQLite users table) — everyone else here logs in only via the PIN quick-login on the
 // login page (see Login.jsx), so their `pin` is what a shared front-counter device checks.
@@ -99,7 +107,7 @@ export function UsersProvider({ children }) {
         ...base,
         username: su.username,
         name: su.displayName,
-        role: su.role,
+        role: displayRole(su.role),
         active: su.active,
         pin: su.hasPin || null,
         serverId: su.id,

@@ -1,5 +1,5 @@
-import { createContext, useContext, useMemo } from 'react';
-import { usePersistentState } from '../lib/persist.js';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { getToken } from '../lib/auth.js';
 import { IconMagnet, IconCircle, IconCardboard, IconBottle, IconDevice, IconBox } from '../icons.jsx';
 
 // Icon components can't survive JSON persistence, so raw data stores an iconKey
@@ -13,39 +13,41 @@ const ICON_MAP = {
   box: IconBox,
 };
 
-// A real deployment keeps the price list as a starting catalog (renamed/edited later by the
-// shop), but starts with zero stock and no price-change history — nothing has been bought
-// or tracked yet.
-export const INITIAL_PRODUCTS_RAW = {
-  iron: { name: 'เหล็ก', cat: 'โลหะ', iconKey: 'magnet', bg: 'var(--amber-bg)', fg: 'var(--amber)', price: 17.0, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0], hist: [] },
-  copper: { name: 'ทองแดง', cat: 'โลหะ', iconKey: 'circle', bg: 'var(--rose-bg)', fg: 'var(--rose)', price: 218.0, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [218, 218, 218, 218, 218, 218, 218], hist: [] },
-  cardboard: { name: 'กระดาษลัง', cat: 'กระดาษ', iconKey: 'cardboard', bg: 'var(--blue-bg)', fg: 'var(--blue)', price: 10.0, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [10, 10, 10, 10, 10, 10, 10], hist: [] },
-  plastic: { name: 'ขวดพลาสติก', cat: 'พลาสติก', iconKey: 'bottle', bg: 'var(--plum-bg)', fg: 'var(--plum)', price: 12.4, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [12.4, 12.4, 12.4, 12.4, 12.4, 12.4, 12.4], hist: [] },
-  aluminum: { name: 'อลูมิเนียม', cat: 'โลหะ', iconKey: 'circle', bg: 'var(--green-100)', fg: 'var(--green-700)', price: 48.0, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [48, 48, 48, 48, 48, 48, 48], hist: [] },
-  stainless: { name: 'สแตนเลส', cat: 'โลหะ', iconKey: 'device', bg: 'var(--teal-bg, #E4F6F4)', fg: 'var(--teal, #0E8E82)', price: 22.5, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: false, spark: [22.5, 22.5, 22.5, 22.5, 22.5, 22.5, 22.5], hist: [] },
-};
-
-export const INITIAL_ORDER = ['iron', 'copper', 'cardboard', 'plastic', 'aluminum', 'stainless'];
-
-export const BLANK_PRODUCT_RAW = { name: '', cat: 'อื่นๆ', iconKey: 'box', bg: 'var(--bg)', fg: 'var(--ink-500)', price: 0, change: '0.0%', dir: 'flat', stock: '0 กก.', stockPct: 0, active: true, spark: [0, 0, 0, 0, 0, 0, 0], hist: [] };
+function authHeaders() {
+  return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` };
+}
 
 const ProductsContext = createContext(null);
 
-function todayThaiShort() {
-  return new Date().toLocaleDateString('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-function money(n) {
-  return '฿' + (n || 0).toFixed(2);
-}
-function formatChangePct(pct) {
-  if (pct > 0) return `+${pct.toFixed(1)}%`;
-  if (pct < 0) return `−${Math.abs(pct).toFixed(1)}%`;
-  return '0.0%';
-}
-
 export function ProductsProvider({ children }) {
-  const [productsRaw, setProductsRaw] = usePersistentState('scrapshop_products', INITIAL_PRODUCTS_RAW);
-  const [order, setOrder] = usePersistentState('scrapshop_products_order', INITIAL_ORDER);
+  const [productsRaw, setProductsRaw] = useState({});
+  const [order, setOrder] = useState([]);
+
+  // Products — prices and, critically, on-hand stock — used to live only in this browser's own
+  // localStorage: a delivery shipping stock out on one device and a purchase adding stock on
+  // another would each keep their own private copy, immediately going stale relative to the
+  // other. Now fetched from the real database behind requireAuth, same as customers/users.
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/products', { headers: authHeaders() });
+      if (!res.ok) return;
+      const data = await res.json();
+      const map = {};
+      const ord = [];
+      for (const p of data.products) {
+        map[p.id] = p;
+        ord.push(p.id);
+      }
+      setProductsRaw(map);
+      setOrder(ord);
+    } catch {
+      // Offline or server down — leave whatever's already loaded rather than clearing it.
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
 
   const products = useMemo(() => {
     const out = {};
@@ -56,127 +58,163 @@ export function ProductsProvider({ children }) {
     return out;
   }, [productsRaw]);
 
-  // Records a real price change as it happens — rather than leaving the seeded 7-day
-  // history/sparkline/% change frozen forever, this pushes a genuine dated entry (or
-  // updates today's if already edited once today) so the trend reflects real edits.
-  function updatePrice(id, newPrice) {
-    setProductsRaw((prev) => {
-      const p = prev[id];
-      if (!p || !(newPrice > 0) || newPrice === p.price) return prev;
-      const pct = p.price > 0 ? ((newPrice - p.price) / p.price) * 100 : 0;
-      const dir = newPrice > p.price ? 'up' : newPrice < p.price ? 'down' : 'flat';
-      const today = todayThaiShort();
-      const prevHist = p.hist || [];
-      const hist = prevHist[0]?.d === today ? [{ d: today, v: money(newPrice) }, ...prevHist.slice(1)] : [{ d: today, v: money(newPrice) }, ...prevHist].slice(0, 7);
-      const prevSpark = p.spark && p.spark.length ? p.spark : [newPrice, newPrice, newPrice, newPrice, newPrice, newPrice, newPrice];
-      const spark = [...prevSpark.slice(1), newPrice];
-      return { ...prev, [id]: { ...p, price: newPrice, change: formatChangePct(pct), dir, hist, spark } };
+  async function createProduct({ name, cat, price }) {
+    const res = await fetch('/api/products', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name, cat, price }),
     });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'เพิ่มรายการสินค้าไม่สำเร็จ');
+    setProductsRaw((prev) => ({ ...prev, [data.product.id]: data.product }));
+    setOrder((prev) => [data.product.id, ...prev]);
+    return data.product;
+  }
+
+  // General patch — active toggle, category reassignment, or a direct stock edit. Price isn't
+  // included here; it goes through updatePrice below so the history/sparkline stay consistent.
+  async function updateProduct(id, patch) {
+    const res = await fetch(`/api/products/${id}`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify(patch),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'บันทึกข้อมูลสินค้าไม่สำเร็จ');
+    setProductsRaw((prev) => ({ ...prev, [id]: data.product }));
+    return data.product;
+  }
+
+  async function deleteProduct(id) {
+    const res = await fetch(`/api/products/${id}`, { method: 'DELETE', headers: authHeaders() });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'ลบรายการสินค้าไม่สำเร็จ');
+    }
+    setProductsRaw((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setOrder((prev) => prev.filter((oid) => oid !== id));
+  }
+
+  // Records a real price change as it happens — the server computes the updated 7-day
+  // history/sparkline/% change so the trend reflects real edits from every device consistently.
+  async function updatePrice(id, newPrice) {
+    if (!(newPrice > 0)) return;
+    const res = await fetch(`/api/products/${id}/price`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ price: newPrice }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    setProductsRaw((prev) => ({ ...prev, [id]: data.product }));
   }
 
   // Buying scrap material adds to the shop's on-hand stock of it — called once per real
-  // purchase row (see ScrapPurchase.jsx) matched by product name, so "สต็อกคงเหลือ" tracks
-  // actual purchases instead of staying frozen at whatever the seed data said. A row typed
-  // into a blank "รายการใหม่" slot with a name that doesn't match any cataloged product is
-  // still a real purchase, so instead of silently dropping the stock update it genuinely
-  // creates the product (priced at what was actually paid on this row) the same way adding
-  // a product from the Products page would.
-  function addStock(productName, weightKg, unitPrice) {
+  // purchase row (see ScrapPurchase.jsx), matched by product name. A row typed into a blank
+  // "รายการใหม่" slot with a name that doesn't match any cataloged product is still a real
+  // purchase — the server creates it (priced at what was actually paid) rather than silently
+  // dropping the stock update.
+  async function addStock(productName, weightKg, unitPrice) {
     if (!weightKg || weightKg <= 0) return;
     const name = (productName || '').trim();
     if (!name) return;
-    // The new id/price must be computed OUTSIDE the updater, not inside it — React 18
-    // StrictMode deliberately invokes state updaters twice in development to catch exactly
-    // this kind of impurity. Date.now()/Math.random() called inside the updater produced a
-    // different id on each of the two invocations, so the id actually saved into `products`
-    // and the id pushed to `order` ended up mismatched, leaving the new product permanently
-    // invisible (present in state, but never in the `order` list every UI iterates over).
-    const newId = `auto_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const price = unitPrice || 0;
-    let created = false;
-    setProductsRaw((prev) => {
-      const id = Object.keys(prev).find((pid) => prev[pid].name === name);
-      if (id) {
-        const p = prev[id];
-        const currentStock = parseFloat(String(p.stock).replace(/[^\d.]/g, '')) || 0;
-        const newStock = currentStock + weightKg;
-        return { ...prev, [id]: { ...p, stock: `${newStock.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.` } };
-      }
-      created = true;
-      return {
-        ...prev,
-        [newId]: {
-          name,
-          cat: 'อื่นๆ',
-          iconKey: 'box',
-          bg: 'var(--bg)',
-          fg: 'var(--ink-500)',
-          price,
-          change: '0.0%',
-          dir: 'flat',
-          stock: `${weightKg.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.`,
-          stockPct: 0,
-          active: true,
-          spark: [price, price, price, price, price, price, price],
-          hist: [],
-        },
-      };
+    const res = await fetch('/api/products/add-stock', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name, weightKg, unitPrice }),
     });
-    if (created) setOrder((prevOrder) => [newId, ...prevOrder]);
+    if (!res.ok) return;
+    const data = await res.json();
+    setProductsRaw((prev) => ({ ...prev, [data.product.id]: data.product }));
+    setOrder((prev) => (prev.includes(data.product.id) ? prev : [data.product.id, ...prev]));
   }
 
-  // Shipping accumulated stock out to a buyer (see DeliveriesContext.jsx) removes it from
-  // on-hand stock, mirroring addStock on the way in — operates by id since the delivery
-  // form picks a real product directly, unlike ScrapPurchase's free-text row names.
-  function removeStock(id, weightKg) {
+  // Shipping accumulated stock out to a buyer (see Deliveries.jsx) removes it from on-hand
+  // stock, by id — the delivery form picks a real product directly, unlike ScrapPurchase's
+  // free-text row names.
+  async function removeStock(id, weightKg) {
     if (!weightKg || weightKg <= 0) return;
-    setProductsRaw((prev) => {
-      const p = prev[id];
-      if (!p) return prev;
-      const currentStock = parseFloat(String(p.stock).replace(/[^\d.]/g, '')) || 0;
-      const newStock = Math.max(currentStock - weightKg, 0);
-      return { ...prev, [id]: { ...p, stock: `${newStock.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.` } };
+    const res = await fetch(`/api/products/${id}/remove-stock`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ weightKg }),
     });
+    if (!res.ok) return;
+    const data = await res.json();
+    setProductsRaw((prev) => ({ ...prev, [id]: data.product }));
   }
 
-  // Restoring a delivery's stock commitment (see Deliveries.jsx delete/edit) needs to operate
-  // by id, mirroring removeStock — unlike addStock's name-based fallback (used for receipts,
-  // which never store an id), fabricating a brand-new placeholder product when the id no
-  // longer exists would corrupt the catalog instead of failing safely. If the product was
-  // deleted after the delivery was created, this just no-ops and reports that back so the
-  // caller can warn the user instead of silently losing or misattributing the stock.
-  function addStockById(id, weightKg) {
+  // Restoring stock to a delivery's original product on delete/edit (see Deliveries.jsx), by
+  // id — unlike addStock's name-based fallback, this never fabricates a placeholder product if
+  // the id no longer exists. Returns whether the restore actually happened, so the caller can
+  // warn the user instead of silently losing or misattributing the stock.
+  async function addStockById(id, weightKg) {
     if (!weightKg || weightKg <= 0) return true;
-    if (!id || !products[id]) return false;
-    setProductsRaw((prev) => {
-      const p = prev[id];
-      if (!p) return prev;
-      const currentStock = parseFloat(String(p.stock).replace(/[^\d.]/g, '')) || 0;
-      const newStock = currentStock + weightKg;
-      return { ...prev, [id]: { ...p, stock: `${newStock.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.` } };
+    if (!id) return false;
+    const res = await fetch(`/api/products/${id}/add-stock`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ weightKg }),
     });
+    if (!res.ok) return false;
+    const data = await res.json();
+    setProductsRaw((prev) => ({ ...prev, [id]: data.product }));
     return true;
   }
 
-  // Voiding a receipt (see Receipts.jsx) needs to give back the stock its purchase added,
-  // but receipts only ever recorded item names — not ids — matching how addStock above looks
-  // products up, so this mirrors that name-based lookup instead of removeStock's id-based one.
-  function removeStockByName(productName, weightKg) {
+  // Voiding or editing a receipt (see Receipts.jsx) needs to give back the stock its purchase
+  // added, but receipts only ever recorded item names — not ids — matching how addStock above
+  // looks products up, so this mirrors that name-based lookup instead of removeStock's id-based one.
+  async function removeStockByName(productName, weightKg) {
     if (!weightKg || weightKg <= 0) return;
     const name = (productName || '').trim();
     if (!name) return;
-    setProductsRaw((prev) => {
-      const id = Object.keys(prev).find((pid) => prev[pid].name === name);
-      if (!id) return prev;
-      const p = prev[id];
-      const currentStock = parseFloat(String(p.stock).replace(/[^\d.]/g, '')) || 0;
-      const newStock = Math.max(currentStock - weightKg, 0);
-      return { ...prev, [id]: { ...p, stock: `${newStock.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} กก.` } };
+    const res = await fetch('/api/products/remove-stock-by-name', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ name, weightKg }),
     });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.product) setProductsRaw((prev) => ({ ...prev, [data.product.id]: data.product }));
+  }
+
+  // Renaming/deleting a category (see Categories.jsx) cascades onto every product referencing
+  // it by name — done atomically server-side, then this just re-syncs the local copy rather
+  // than trying to guess which individual rows changed.
+  async function reassignCategory(fromCat, toCat) {
+    const res = await fetch('/api/products/reassign-category', {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ fromCat, toCat }),
+    });
+    if (!res.ok) return 0;
+    const data = await res.json();
+    if (data.movedCount) await refresh();
+    return data.movedCount || 0;
   }
 
   return (
-    <ProductsContext.Provider value={{ products, setProducts: setProductsRaw, order, setOrder, updatePrice, addStock, addStockById, removeStock, removeStockByName }}>
+    <ProductsContext.Provider
+      value={{
+        products,
+        order,
+        createProduct,
+        updateProduct,
+        deleteProduct,
+        updatePrice,
+        addStock,
+        addStockById,
+        removeStock,
+        removeStockByName,
+        reassignCategory,
+        refresh,
+      }}
+    >
       {children}
     </ProductsContext.Provider>
   );

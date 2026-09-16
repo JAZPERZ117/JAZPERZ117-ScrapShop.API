@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { exportCsv } from '../lib/csvExport.js';
-import { useCustomers, BLANK_CUSTOMER, INITIAL_ORDER } from '../context/CustomersContext.jsx';
+import { useCustomers, INITIAL_ORDER } from '../context/CustomersContext.jsx';
 import { IconUsers, IconDownload, IconUserAdd, IconCheck, IconPhoneCall, IconIdCard, IconMapPin, IconWarningTriangle, IconPlus, IconEdit, IconX, IconTrash } from '../icons.jsx';
 import RowMenu from '../components/RowMenu.jsx';
 import IdPhotoCapture from '../components/IdPhotoCapture.jsx';
@@ -17,7 +17,7 @@ function money(n) {
 
 export default function Customers() {
   const navigate = useNavigate();
-  const { customers, setCustomers, order, setOrder } = useCustomers();
+  const { customers, order, addCustomer, updateCustomer, deleteCustomer } = useCustomers();
   const newCustomerIds = order.filter((id) => !INITIAL_ORDER.includes(id));
   const regularCount = order.filter((id) => customers[id].tag === 'regular').length;
   const totalRevenue = order.reduce((sum, id) => sum + parseMoney(customers[id].total), 0);
@@ -29,6 +29,13 @@ export default function Customers() {
     [order, customers]
   );
   const [selectedId, setSelectedId] = useState(order[0]);
+  // Customers now load asynchronously from the server (see CustomersContext.jsx), so `order`
+  // is still empty on the very first render — `useState(order[0])` above only runs once and
+  // captures nothing. Once the fetch resolves, select the first real customer instead of
+  // leaving `customers[selectedId]` (and everything below that reads it unguarded) undefined.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) setSelectedId(order[0]);
+  }, [order, selectedId]);
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [showNew, setShowNew] = useState(false);
@@ -70,32 +77,36 @@ export default function Customers() {
     );
   }
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
     if (!newName.trim() || !newPhone.trim()) return;
-    const id = `new_${Date.now()}`;
-    setCustomers((prev) => ({
-      ...prev,
-      [id]: {
-        ...BLANK_CUSTOMER,
+    try {
+      const created = await addCustomer({
         name: newName.trim(),
         phone: newPhone.trim(),
         idNumber: newIdNumber.trim(),
         idExpiry: newIdExpiry,
         idPhoto: newIdPhoto,
-        init: newName.trim().replace('คุณ', '').trim().slice(0, 2),
-        createdAt: new Date().toISOString(),
-      },
-    }));
-    setOrder((prev) => [id, ...prev]);
+      });
+      setSelectedId(created.id);
+      setNewName('');
+      setNewPhone('');
+      setNewIdNumber('');
+      setNewIdExpiry('');
+      setNewIdPhoto('');
+      setShowNew(false);
+      setBanner({ type: 'success', text: `เพิ่มลูกค้า ${newName.trim()} เรียบร้อยแล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
+  }
+
+  // Selecting a different row must close any edit form left open on the previous one —
+  // otherwise its stale editName/editPhone/etc. stay bound to whatever id selectedId moves
+  // to next, and saving would overwrite the newly-selected customer with the old one's data.
+  function selectCustomer(id) {
     setSelectedId(id);
-    setNewName('');
-    setNewPhone('');
-    setNewIdNumber('');
-    setNewIdExpiry('');
-    setNewIdPhoto('');
-    setShowNew(false);
-    setBanner({ type: 'success', text: `เพิ่มลูกค้า ${newName.trim()} เรียบร้อยแล้ว` });
+    setEditOpen(false);
   }
 
   function openEdit(id = selectedId) {
@@ -110,42 +121,36 @@ export default function Customers() {
     setEditOpen(true);
   }
 
-  function handleSaveEdit(e) {
+  async function handleSaveEdit(e) {
     e.preventDefault();
-    setCustomers((prev) => {
-      const nextName = editName.trim() || prev[selectedId].name;
-      return {
-        ...prev,
-        [selectedId]: {
-          ...prev[selectedId],
-          name: nextName,
-          // Recomputed the same way handleCreate derives it, so renaming a customer
-          // doesn't leave their avatar showing initials from the old name.
-          init: nextName.replace('คุณ', '').trim().slice(0, 2) || prev[selectedId].init,
-          phone: editPhone.trim() || prev[selectedId].phone,
-          idNumber: editIdNumber.trim(),
-          idExpiry: editIdExpiry,
-          idPhoto: editIdPhoto,
-          tag: editTag,
-        },
-      };
-    });
-    setEditOpen(false);
-    setBanner({ type: 'success', text: 'บันทึกข้อมูลลูกค้าเรียบร้อยแล้ว' });
+    try {
+      await updateCustomer(selectedId, {
+        name: editName.trim(),
+        phone: editPhone.trim(),
+        idNumber: editIdNumber.trim(),
+        idExpiry: editIdExpiry,
+        idPhoto: editIdPhoto,
+        tag: editTag,
+      });
+      setEditOpen(false);
+      setBanner({ type: 'success', text: 'บันทึกข้อมูลลูกค้าเรียบร้อยแล้ว' });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
-  function handleDelete(id = selectedId) {
+  async function handleDelete(id = selectedId) {
     const target = customers[id];
     if (!window.confirm(`ยืนยันลบข้อมูลลูกค้า "${target.name}"?`)) return;
-    const remaining = order.filter((oid) => oid !== id);
-    setOrder(remaining);
-    setCustomers((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    if (id === selectedId && remaining[0]) setSelectedId(remaining[0]);
-    setBanner({ type: 'error', text: `ลบข้อมูลลูกค้า "${target.name}" แล้ว` });
+    try {
+      await deleteCustomer(id);
+      const remaining = order.filter((oid) => oid !== id);
+      if (id === selectedId && remaining[0]) setSelectedId(remaining[0]);
+      setEditOpen(false);
+      setBanner({ type: 'error', text: `ลบข้อมูลลูกค้า "${target.name}" แล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
   return (
@@ -283,7 +288,7 @@ export default function Customers() {
               {rows.map((id) => {
                 const cu = customers[id];
                 return (
-                  <tr key={id} className={`clickable${id === selectedId ? ' selected-row' : ''}`} onClick={() => setSelectedId(id)}>
+                  <tr key={id} className={`clickable${id === selectedId ? ' selected-row' : ''}`} onClick={() => selectCustomer(id)}>
                     <td>
                       <div className="row-cell">
                         <div className="row-icon" style={{ background: cu.bg, color: cu.fg, borderRadius: '99px' }}>
@@ -494,7 +499,7 @@ export default function Customers() {
                 style={{ cursor: 'pointer' }}
                 role="button"
                 tabIndex={0}
-                onClick={() => setSelectedId(id)}
+                onClick={() => selectCustomer(id)}
               >
                 <span>{customers[id].name}</span>
                 <span className="n">{customers[id].idDaysLeft < 0 ? `หมดอายุแล้ว ${Math.abs(customers[id].idDaysLeft)} วัน` : `${customers[id].idDaysLeft} วัน`}</span>

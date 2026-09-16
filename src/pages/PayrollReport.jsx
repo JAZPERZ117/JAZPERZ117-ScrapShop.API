@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { usePayroll, DAY_LABELS, ATTENDANCE_LABEL, PAY_METHOD_LABELS } from '../context/PayrollContext.jsx';
 import { exportCsv } from '../lib/csvExport.js';
-import { IconReceipt, IconDownload, IconCash, IconClockHistory, IconUsers } from '../icons.jsx';
+import { IconReceipt, IconDownload, IconCash, IconClockHistory, IconUsers, IconSearch, IconX } from '../icons.jsx';
 
 function money(n) {
   return '฿' + (Number(n) || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -24,19 +24,53 @@ function paidDateShort(date) {
   return new Date(date).toLocaleDateString('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short' });
 }
 
+// Local, not UTC — matches ReceiptsContext.jsx's own todayISO(), which is what every
+// receipt's `date` field is actually stamped with (and avoids the day-shift .toISOString()
+// would cause for Thailand's UTC+7 in the evening).
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Same Mon-Sat week bucketing as Payroll.jsx's own getWeekStart/weekKeyOf (not exported from
+// there, so mirrored here) — needed to turn a date the user types into the search box into
+// the same weekKey a payment made during that week would have been stamped with.
+function getWeekStart(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diffToMonday);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function weekKeyOfDate(date) {
+  const monday = getWeekStart(date);
+  return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+}
+
 // Every finalized payment already carries weekKey/weekLabel (stamped at pay time in
 // Payroll.jsx); month/year grouping reads the same records at a coarser granularity by
-// re-deriving the bucket from paidAt instead of needing its own stored field.
+// re-deriving the bucket from paidAt instead of needing its own stored field. `keyOfDate`
+// turns a plain date (from the search box below) into the same key shape, so a typed date
+// can look up the period group it falls inside instead of only being pickable from a list.
 const REPORT_PERIODS = [
-  { key: 'week', label: 'รายสัปดาห์', groupKey: (r) => r.weekKey, groupLabel: (r) => r.weekLabel },
-  { key: 'month', label: 'รายเดือน', groupKey: (r) => monthKeyOf(r.paidAt), groupLabel: (r) => monthLabelOf(r.paidAt) },
-  { key: 'year', label: 'รายปี', groupKey: (r) => yearKeyOf(r.paidAt), groupLabel: (r) => yearLabelOf(r.paidAt) },
+  { key: 'week', label: 'รายสัปดาห์', groupKey: (r) => r.weekKey, groupLabel: (r) => r.weekLabel, keyOfDate: (d) => weekKeyOfDate(d) },
+  {
+    key: 'month',
+    label: 'รายเดือน',
+    groupKey: (r) => monthKeyOf(r.paidAt),
+    groupLabel: (r) => monthLabelOf(r.paidAt),
+    keyOfDate: (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+  },
+  { key: 'year', label: 'รายปี', groupKey: (r) => yearKeyOf(r.paidAt), groupLabel: (r) => yearLabelOf(r.paidAt), keyOfDate: (d) => String(d.getFullYear()) },
 ];
 
 export default function PayrollReport() {
   const { payHistory } = usePayroll();
   const [reportPeriod, setReportPeriod] = useState('week');
   const [selectedPeriodKey, setSelectedPeriodKey] = useState(null);
+  const [searchDate, setSearchDate] = useState('');
+  const [banner, setBanner] = useState(null);
 
   const periodDef = REPORT_PERIODS.find((p) => p.key === reportPeriod);
 
@@ -61,6 +95,24 @@ export default function PayrollReport() {
   function selectReportPeriod(period) {
     setReportPeriod(period);
     setSelectedPeriodKey(null);
+    setSearchDate('');
+    setBanner(null);
+  }
+
+  // Looks up which period group (week/month/year, depending on the active tab) a typed date
+  // falls inside, so the user can jump straight to a payroll period by date instead of only
+  // ever picking one from the dropdown list.
+  function handleSearchDate(value) {
+    setSearchDate(value);
+    if (!value) return;
+    const d = new Date(`${value}T00:00:00`);
+    const key = periodDef.keyOfDate(d);
+    if (periodGroups.some((g) => g.key === key)) {
+      setSelectedPeriodKey(key);
+      setBanner(null);
+    } else {
+      setBanner({ type: 'error', text: 'ไม่พบประวัติการจ่ายเงินเดือนในช่วงเวลาที่เลือก' });
+    }
   }
 
   const allTimeTotal = useMemo(() => payHistory.reduce((sum, r) => sum + (r.net || 0), 0), [payHistory]);
@@ -104,6 +156,15 @@ export default function PayrollReport() {
           </button>
         </div>
       </div>
+
+      {banner && (
+        <div className={`page-banner banner-${banner.type}`}>
+          {banner.text}
+          <button type="button" className="banner-close" onClick={() => setBanner(null)}>
+            <IconX />
+          </button>
+        </div>
+      )}
 
       <div className="stat-grid">
         <div className="stat-card">
@@ -167,7 +228,11 @@ export default function PayrollReport() {
               className="input-plain"
               style={{ maxWidth: 280 }}
               value={activePeriodKey}
-              onChange={(e) => setSelectedPeriodKey(e.target.value)}
+              onChange={(e) => {
+                setSelectedPeriodKey(e.target.value);
+                setSearchDate('');
+                setBanner(null);
+              }}
             >
               {periodGroups.map((g) => (
                 <option key={g.key} value={g.key}>
@@ -175,6 +240,29 @@ export default function PayrollReport() {
                 </option>
               ))}
             </select>
+            <div className="search-box">
+              <IconSearch style={{ width: 16, height: 16 }} />
+              <input
+                type="date"
+                value={searchDate}
+                max={todayISO()}
+                onChange={(e) => handleSearchDate(e.target.value)}
+                title={`ค้นหา${periodDef.label}ที่มีวันที่นี้อยู่`}
+              />
+            </div>
+            {searchDate && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setSearchDate('');
+                  setBanner(null);
+                }}
+              >
+                <IconX style={{ width: 14, height: 14 }} />
+                ล้างการค้นหา
+              </button>
+            )}
           </div>
         )}
 

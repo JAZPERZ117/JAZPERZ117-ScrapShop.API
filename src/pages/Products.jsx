@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { exportCsv } from '../lib/csvExport.js';
 import {
   IconBox,
@@ -56,7 +56,7 @@ function parseStockKg(stock) {
 }
 
 export default function Products() {
-  const { products, setProducts, order, setOrder, updatePrice } = useProducts();
+  const { products, order, createProduct, updateProduct, deleteProduct, updatePrice } = useProducts();
   const { categories } = useCategories();
   const categoryNames = Object.values(categories).map((c) => c.name);
   // New products can only be assigned to an active category — an inactive one is meant to
@@ -69,6 +69,7 @@ export default function Products() {
   const [selectedId, setSelectedId] = useState(order[0]);
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [priceInput, setPriceInput] = useState(products[order[0]] ? products[order[0]].price.toFixed(2) : '0.00');
   const [stockInput, setStockInput] = useState(products[order[0]]?.stock || '');
   const [catInput, setCatInput] = useState(products[order[0]]?.cat || categoryNames[0] || 'อื่นๆ');
@@ -77,17 +78,26 @@ export default function Products() {
   const [newPrice, setNewPrice] = useState('');
   const [newCat, setNewCat] = useState(activeCategoryNames[0] || 'อื่นๆ');
   const [banner, setBanner] = useState(null);
+  // Products now load asynchronously from the server (see ProductsContext.jsx), so `order` is
+  // still empty on the very first render — every `useState(... order[0] ...)` above only runs
+  // once and captures nothing. Once the fetch resolves, select the first real product so the
+  // detail form (price/stock/category inputs) actually has something to show and edit.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) selectProduct(order[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, selectedId]);
 
   const rows = useMemo(() => {
     return order.filter((id) => {
       const p = products[id];
       if (filter === 'active' && !p.active) return false;
       if (filter === 'inactive' && p.active) return false;
+      if (categoryFilter && p.cat !== categoryFilter) return false;
       const q = query.trim().toLowerCase();
       if (q && !p.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [filter, query, products, order]);
+  }, [filter, query, categoryFilter, products, order]);
 
   const p = products[selectedId];
   const DirIcon = p ? dirIcon[p.dir] : null;
@@ -113,23 +123,28 @@ export default function Products() {
     setCatInput(products[id].cat);
   }
 
-  function toggleActive(id) {
-    setProducts((prev) => ({ ...prev, [id]: { ...prev[id], active: !prev[id].active } }));
+  async function toggleActive(id) {
+    try {
+      await updateProduct(id, { active: !products[id].active });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
-  function handleSave() {
+  async function handleSave() {
     const parsed = parseFloat(priceInput);
     const newPrice = parsed || p.price;
-    updatePrice(selectedId, newPrice);
-    setProducts((prev) => ({
-      ...prev,
-      [selectedId]: { ...prev[selectedId], stock: stockInput, cat: catInput },
-    }));
-    // If the typed price didn't parse (or was 0), the real price silently stays unchanged —
-    // reset the field back to it too, otherwise it keeps showing the rejected text forever
-    // while the price hero/table above correctly still show the real, unchanged price.
-    if (!parsed) setPriceInput(newPrice.toFixed(2));
-    setBanner({ type: 'success', text: `บันทึกการเปลี่ยนแปลงของ ${p.name} เรียบร้อยแล้ว` });
+    try {
+      if (parsed) await updatePrice(selectedId, newPrice);
+      await updateProduct(selectedId, { stock: stockInput, cat: catInput });
+      // If the typed price didn't parse (or was 0), the real price silently stays unchanged —
+      // reset the field back to it too, otherwise it keeps showing the rejected text forever
+      // while the price hero/table above correctly still show the real, unchanged price.
+      if (!parsed) setPriceInput(newPrice.toFixed(2));
+      setBanner({ type: 'success', text: `บันทึกการเปลี่ยนแปลงของ ${p.name} เรียบร้อยแล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
   function handleExport() {
@@ -143,54 +158,38 @@ export default function Products() {
     );
   }
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
     if (!newName.trim()) return;
-    const id = `new_${Date.now()}`;
     const price = parseFloat(newPrice) || 0;
     const cat = newCat || activeCategoryNames[0] || 'อื่นๆ';
-    setProducts((prev) => ({
-      ...prev,
-      [id]: {
-        name: newName.trim(),
-        cat,
-        iconKey: 'box',
-        bg: 'var(--bg)',
-        fg: 'var(--ink-500)',
-        price,
-        change: '0.0%',
-        dir: 'flat',
-        stock: '0 กก.',
-        stockPct: 0,
-        active: true,
-        spark: [price, price, price, price, price, price, price],
-        hist: [],
-      },
-    }));
-    setOrder((prev) => [id, ...prev]);
-    setSelectedId(id);
-    setPriceInput(price.toFixed(2));
-    setStockInput('0 กก.');
-    setCatInput(cat);
-    setNewName('');
-    setNewPrice('');
-    setNewCat(activeCategoryNames[0] || 'อื่นๆ');
-    setShowNew(false);
-    setBanner({ type: 'success', text: `เพิ่มรายการสินค้า ${newName.trim()} เรียบร้อยแล้ว` });
+    try {
+      const created = await createProduct({ name: newName.trim(), cat, price });
+      setSelectedId(created.id);
+      setPriceInput(price.toFixed(2));
+      setStockInput(created.stock);
+      setCatInput(cat);
+      setNewName('');
+      setNewPrice('');
+      setNewCat(activeCategoryNames[0] || 'อื่นๆ');
+      setShowNew(false);
+      setBanner({ type: 'success', text: `เพิ่มรายการสินค้า ${newName.trim()} เรียบร้อยแล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
-  function handleDelete(id = selectedId) {
+  async function handleDelete(id = selectedId) {
     const target = products[id];
     if (!window.confirm(`ยืนยันลบรายการสินค้า "${target.name}"?`)) return;
-    const remaining = order.filter((oid) => oid !== id);
-    setOrder(remaining);
-    setProducts((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    if (id === selectedId && remaining[0]) selectProduct(remaining[0]);
-    setBanner({ type: 'error', text: `ลบรายการสินค้า "${target.name}" แล้ว` });
+    try {
+      await deleteProduct(id);
+      const remaining = order.filter((oid) => oid !== id);
+      if (id === selectedId && remaining[0]) selectProduct(remaining[0]);
+      setBanner({ type: 'error', text: `ลบรายการสินค้า "${target.name}" แล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
   return (
@@ -310,7 +309,14 @@ export default function Products() {
               <IconBox style={{ width: 16, height: 16 }} />
               <input placeholder="ค้นหาชื่อสินค้า" value={query} onChange={(e) => setQuery(e.target.value)} />
             </div>
-            <div className="select-mini">ทุกหมวดหมู่</div>
+            <select className="select-mini" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+              <option value="">ทุกหมวดหมู่</option>
+              {activeCategoryNames.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <table className="data-table">
