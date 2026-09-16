@@ -16,6 +16,7 @@ dist-ssr
 server/.env
 server/shop.db
 server/certs
+server/backups
 
 # Local Claude Code runtime state (session-specific, not project source)
 .claude/scheduled_tasks.lock
