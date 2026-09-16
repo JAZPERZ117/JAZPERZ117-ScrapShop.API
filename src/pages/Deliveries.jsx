@@ -66,8 +66,8 @@ function bahtText(amount) {
 }
 
 export default function Deliveries() {
-  const { deliveries, setDeliveries, order, setOrder, addDelivery, markDelivered } = useDeliveries();
-  const { products, order: productOrder, addStock, removeStock } = useProducts();
+  const { deliveries, order, addDelivery, updateDelivery, deleteDelivery, markDelivered } = useDeliveries();
+  const { products, order: productOrder, addStock, addStockById, removeStock } = useProducts();
   const { settings } = useSettings();
 
   const [showForm, setShowForm] = useState(false);
@@ -144,7 +144,7 @@ export default function Deliveries() {
     resetForm();
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!buyerName.trim()) {
       setBanner({ type: 'error', text: 'กรุณากรอกชื่อผู้รับซื้อปลายทาง' });
       return;
@@ -157,29 +157,37 @@ export default function Deliveries() {
     const no = makeDeliveryNo();
     const timeStr = nowTimeStr();
     const items = validRows.map((r) => ({
+      // Keep the id alongside the display name — stock restore on delete/edit needs to
+      // operate by id (see addStockById) so it can't be fooled by a later product rename,
+      // and can fail safely instead of fabricating a placeholder product if the product is
+      // deleted after this delivery is created.
+      productId: r.productId,
       name: products[r.productId].name,
       weight: rowWeight(r),
       price: parseFloat(r.price) || 0,
       amount: rowAmount(r),
     }));
-    addDelivery({
-      no,
-      time: timeStr,
-      buyerName: buyerName.trim(),
-      buyerAddress: buyerAddress.trim(),
-      buyerContact: buyerContact.trim(),
-      vehicle: vehicle.trim(),
-      driver: driver.trim(),
-      note: note.trim(),
-      items,
-      totalWeight,
-      totalAmount,
-    });
+    try {
+      await addDelivery({
+        no,
+        time: timeStr,
+        buyerName: buyerName.trim(),
+        buyerAddress: buyerAddress.trim(),
+        buyerContact: buyerContact.trim(),
+        vehicle: vehicle.trim(),
+        driver: driver.trim(),
+        note: note.trim(),
+        items,
+        totalWeight,
+        totalAmount,
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     // Goods physically leave the shop once the delivery is dispatched, so stock drops now —
     // "ยืนยันส่งถึงแล้ว" afterwards only confirms arrival, it doesn't move any more stock.
-    for (const r of validRows) {
-      removeStock(r.productId, rowWeight(r));
-    }
+    await Promise.all(validRows.map((r) => removeStock(r.productId, rowWeight(r))));
     setBanner({ type: 'success', text: `บันทึกใบส่งของ ${no} เรียบร้อยแล้ว น้ำหนักรวม ${totalWeight.toFixed(2)} กก.` });
     setSelectedId(no);
     resetForm();
@@ -206,7 +214,8 @@ export default function Deliveries() {
       originalItems: d.items,
       items: d.items.map((it) => ({
         rowId: nextRowId++,
-        productId: productOrder.find((pid) => products[pid].name === it.name) || '',
+        // Older deliveries (saved before productId was tracked) fall back to a name lookup.
+        productId: (it.productId && products[it.productId] ? it.productId : null) || productOrder.find((pid) => products[pid].name === it.name) || '',
         weight: String(it.weight),
         price: String(it.price),
       })),
@@ -244,7 +253,9 @@ export default function Deliveries() {
     if (!row.productId || !editForm) return 0;
     const live = parseStockKg(products[row.productId]?.stock);
     const productName = products[row.productId]?.name;
-    const reserved = editForm.originalItems.filter((it) => it.name === productName).reduce((s, it) => s + it.weight, 0);
+    const reserved = editForm.originalItems
+      .filter((it) => (it.productId ? it.productId === row.productId : it.name === productName))
+      .reduce((s, it) => s + it.weight, 0);
     const idx = editForm.items.indexOf(row);
     const claimedBySiblings = editForm.items.slice(0, idx).reduce((sum, it) => (it.productId === row.productId ? sum + editRowWeight(it) : sum), 0);
     return Math.max(live + reserved - claimedBySiblings, 0);
@@ -259,9 +270,16 @@ export default function Deliveries() {
   const editTotalWeight = isEditing ? editForm.items.reduce((s, r) => s + editRowWeight(r), 0) : 0;
   const editTotalAmount = isEditing ? editForm.items.reduce((s, r) => s + editRowAmount(r), 0) : 0;
 
-  function saveEditDelivery() {
+  async function saveEditDelivery() {
     if (!editForm.buyerName.trim()) {
       setBanner({ type: 'error', text: 'กรุณากรอกชื่อผู้รับซื้อปลายทาง' });
+      return;
+    }
+    // A row with no resolvable productId means the product it referenced was deleted and no
+    // product with the same name exists either — warn instead of silently dropping the line
+    // item and its weight from the saved delivery.
+    const orphanedCount = editForm.items.filter((r) => !r.productId).length;
+    if (orphanedCount > 0 && !window.confirm(`${orphanedCount} รายการอ้างอิงสินค้าที่ถูกลบไปแล้วและจะถูกตัดออกจากใบส่งของนี้ ต้องการดำเนินการต่อหรือไม่?`)) {
       return;
     }
     const validRows = editForm.items.filter((r) => r.productId && editRowWeight(r) > 0);
@@ -272,23 +290,21 @@ export default function Deliveries() {
     const id = editForm.id;
     const original = deliveries[id];
     // Give back the delivery's old stock commitment, then take the edited amounts — correct
-    // regardless of what changed (weights, products added/removed, or both at once).
-    for (const it of editForm.originalItems) {
-      addStock(it.name, it.weight);
-    }
+    // regardless of what changed (weights, products added/removed, or both at once). Restore
+    // by id when available (addStockById) rather than by name — a name-based restore on a
+    // product that's since been renamed wouldn't find it, and worse, would fabricate a
+    // brand-new placeholder product instead of updating the real one. Older deliveries saved
+    // before productId was tracked have no id to fall back on, so they still use the
+    // name-based restore (unchanged, pre-existing behavior for that legacy data only).
     const items = validRows.map((r) => ({
+      productId: r.productId,
       name: products[r.productId].name,
       weight: editRowWeight(r),
       price: parseFloat(r.price) || 0,
       amount: editRowAmount(r),
     }));
-    for (const r of validRows) {
-      removeStock(r.productId, editRowWeight(r));
-    }
-    setDeliveries((prev) => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
+    try {
+      await updateDelivery(id, {
         buyerName: editForm.buyerName.trim(),
         buyerAddress: editForm.buyerAddress.trim(),
         buyerContact: editForm.buyerContact.trim(),
@@ -298,34 +314,60 @@ export default function Deliveries() {
         items,
         totalWeight: editTotalWeight,
         totalAmount: editTotalAmount,
-      },
-    }));
-    setBanner({ type: 'success', text: `บันทึกการแก้ไขใบส่งของ ${original.no} แล้ว` });
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    let unrestoredWeight = 0;
+    for (const it of editForm.originalItems) {
+      if (it.productId) {
+        if (!(await addStockById(it.productId, it.weight))) unrestoredWeight += it.weight;
+      } else {
+        await addStock(it.name, it.weight);
+      }
+    }
+    await Promise.all(validRows.map((r) => removeStock(r.productId, editRowWeight(r))));
+    setBanner(
+      unrestoredWeight > 0
+        ? { type: 'error', text: `บันทึกการแก้ไขใบส่งของ ${original.no} แล้ว — แต่คืนสต็อกเดิม ${unrestoredWeight.toFixed(2)} กก. ไม่ได้ เพราะสินค้านั้นถูกลบไปแล้ว กรุณาตรวจสอบสต็อกด้วยตนเอง` }
+        : { type: 'success', text: `บันทึกการแก้ไขใบส่งของ ${original.no} แล้ว` }
+    );
     setIsEditing(false);
     setEditForm(null);
   }
 
-  function handleDeleteDelivery(id = selectedId) {
+  async function handleDeleteDelivery(id = selectedId) {
     const d = deliveries[id];
     if (!d) return;
     if (!window.confirm(`ยืนยันลบใบส่งของ "${d.no}"? ระบบจะคืนน้ำหนักสินค้ากลับเข้าสต็อกให้อัตโนมัติ`)) return;
-    // The goods never actually left, so give the weight back to each product's stock.
+    // The goods never actually left, so give the weight back to each product's stock. Restore
+    // by id when available — see saveEditDelivery for why a name-based fallback only applies
+    // to legacy deliveries that never had a productId to begin with.
+    let unrestoredWeight = 0;
     for (const it of d.items) {
-      addStock(it.name, it.weight);
+      if (it.productId) {
+        if (!(await addStockById(it.productId, it.weight))) unrestoredWeight += it.weight;
+      } else {
+        await addStock(it.name, it.weight);
+      }
     }
-    const remaining = order.filter((oid) => oid !== id);
-    setOrder(remaining);
-    setDeliveries((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    try {
+      await deleteDelivery(id);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     if (id === selectedId) setSelectedId(null);
     if (isEditing && editForm?.id === id) {
       setIsEditing(false);
       setEditForm(null);
     }
-    setBanner({ type: 'error', text: `ลบใบส่งของ "${d.no}" แล้ว — คืนน้ำหนักสินค้ากลับเข้าสต็อกแล้ว` });
+    setBanner(
+      unrestoredWeight > 0
+        ? { type: 'error', text: `ลบใบส่งของ "${d.no}" แล้ว — แต่คืนสต็อก ${unrestoredWeight.toFixed(2)} กก. ไม่ได้ เพราะสินค้านั้นถูกลบไปแล้ว กรุณาตรวจสอบสต็อกด้วยตนเอง` }
+        : { type: 'error', text: `ลบใบส่งของ "${d.no}" แล้ว — คืนน้ำหนักสินค้ากลับเข้าสต็อกแล้ว` }
+    );
   }
 
   const rowsFiltered = useMemo(() => {

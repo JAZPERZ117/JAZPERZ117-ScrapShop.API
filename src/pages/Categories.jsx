@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { IconCategory, IconSort, IconPlus, IconCheck, IconBottle, IconX } from '../icons.jsx';
 import { useCategories, SWATCHES, SWATCH_COLOR } from '../context/CategoriesContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
@@ -18,8 +18,8 @@ function money(n) {
 }
 
 export default function Categories() {
-  const { categories, setCategoriesRaw, order, setOrder } = useCategories();
-  const { products, setProducts } = useProducts();
+  const { categories, order, createCategory, updateCategory, deleteCategory, reorderCategories } = useCategories();
+  const { products, reassignCategory } = useProducts();
   const { receipts } = useReceipts();
   const [selectedId, setSelectedId] = useState(order[0]);
   const [swatch, setSwatch] = useState(categories[order[0]]?.color || 'slate');
@@ -31,23 +31,31 @@ export default function Categories() {
   const [newDesc, setNewDesc] = useState('');
   const [banner, setBanner] = useState(null);
 
-  const c = categories[selectedId];
+  // Categories now load asynchronously from the server (see CategoriesContext.jsx), so `order`
+  // is still empty on the very first render — select the first real category once data
+  // actually loads, same fix already applied to Receipts/Products/Customers/Payroll/Deductions.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) select(order[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, selectedId]);
 
   // All per-category numbers below are derived live from real Products/Receipts data
   // instead of hardcoded figures, so they stay correct after any add/edit/delete.
   const productIds = Object.keys(products);
   const revenueByCategory = useMemo(() => {
-    const byName = {};
-    for (const id of Object.values(receipts)) {
-      if (id.status === 'void') continue;
-      for (const it of id.items || []) {
-        byName[it.n] = (byName[it.n] || 0) + parseMoney(it.t);
-      }
-    }
     const out = {};
-    for (const pid of productIds) {
-      const p = products[pid];
-      out[p.cat] = (out[p.cat] || 0) + (byName[p.name] || 0);
+    for (const r of Object.values(receipts)) {
+      if (r.status === 'void') continue;
+      for (const it of r.items || []) {
+        // Prefer the category snapshotted at purchase time (see ScrapPurchase.jsx) so a
+        // product's historical revenue stays attributed to its category even after the
+        // product itself is later deleted. Receipts from before that snapshot existed fall
+        // back to a live name lookup, same as before — only pre-existing receipts can still
+        // lose their category attribution if the referenced product no longer exists.
+        const cat = it.cat || Object.values(products).find((p) => p.name === it.n)?.cat;
+        if (!cat) continue;
+        out[cat] = (out[cat] || 0) + parseMoney(it.t);
+      }
     }
     return out;
   }, [receipts, products]);
@@ -77,6 +85,12 @@ export default function Categories() {
   const topCategoryId = order.reduce((best, id) => (!best || categoryStats[id]?.revenue > categoryStats[best]?.revenue ? id : best), null);
   const topCategories = [...order].sort((a, b) => (categoryStats[b]?.revenue || 0) - (categoryStats[a]?.revenue || 0)).slice(0, 3);
 
+  const c = categories[selectedId];
+  // `categories[selectedId]` can briefly be missing while data loads — bail out rather than
+  // rendering a detail panel built from `undefined` (c.color, c.name, etc.). Placed after
+  // every hook above so the hook call order stays identical across renders.
+  if (!c) return null;
+
   function select(id) {
     setSelectedId(id);
     setSwatch(categories[id].color);
@@ -84,59 +98,58 @@ export default function Categories() {
     setEditDesc(categories[id].desc);
   }
 
-  function toggleActive() {
-    setCategoriesRaw((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], isActive: !prev[selectedId].isActive } }));
+  async function toggleActive() {
+    try {
+      await updateCategory(selectedId, { isActive: !c.isActive });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
-  function handleSort() {
+  async function handleSort() {
     const next = [...order].sort((a, b) => (sortAsc ? categories[a].name.localeCompare(categories[b].name, 'th') : categories[b].name.localeCompare(categories[a].name, 'th')));
-    setOrder(next);
+    await reorderCategories(next);
     setSortAsc((v) => !v);
     setBanner({ type: 'success', text: `เรียงลำดับหมวดหมู่ตามชื่อ ${sortAsc ? 'ก-ฮ' : 'ฮ-ก'} แล้ว` });
   }
 
-  function handleCreate(e) {
+  async function handleCreate(e) {
     e.preventDefault();
     if (!newName.trim()) return;
-    const id = `cat_${Date.now()}`;
-    setCategoriesRaw((prev) => ({ ...prev, [id]: { name: newName.trim(), iconKey: 'other', color: 'slate', desc: newDesc.trim(), isActive: true } }));
-    setOrder((prev) => [id, ...prev]);
-    setSelectedId(id);
-    setSwatch('slate');
-    setEditName(newName.trim());
-    setEditDesc(newDesc.trim());
-    setNewName('');
-    setNewDesc('');
-    setShowNew(false);
-    setBanner({ type: 'success', text: `เพิ่มหมวดหมู่ ${newName.trim()} เรียบร้อยแล้ว` });
+    try {
+      const created = await createCategory({ name: newName.trim(), desc: newDesc.trim() });
+      setSelectedId(created.id);
+      setSwatch(created.color);
+      setEditName(created.name);
+      setEditDesc(created.desc);
+      setNewName('');
+      setNewDesc('');
+      setShowNew(false);
+      setBanner({ type: 'success', text: `เพิ่มหมวดหมู่ ${newName.trim()} เรียบร้อยแล้ว` });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
-  function handleSave() {
+  async function handleSave() {
     const nextName = editName.trim() || c.name;
     const prevName = c.name;
-    setCategoriesRaw((prev) => ({ ...prev, [selectedId]: { ...prev[selectedId], name: nextName, desc: editDesc, color: swatch } }));
+    try {
+      await updateCategory(selectedId, { name: nextName, desc: editDesc, color: swatch });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     // Products reference their category by name, not id (see ProductsContext.jsx) — without
     // this, renaming a category would silently orphan every product already assigned to it:
     // they'd keep the old name string and drop out of this category everywhere it's grouped.
     if (nextName !== prevName) {
-      setProducts((prev) => {
-        let changed = false;
-        const next = {};
-        for (const id in prev) {
-          if (prev[id].cat === prevName) {
-            changed = true;
-            next[id] = { ...prev[id], cat: nextName };
-          } else {
-            next[id] = prev[id];
-          }
-        }
-        return changed ? next : prev;
-      });
+      await reassignCategory(prevName, nextName);
     }
     setBanner({ type: 'success', text: `บันทึกการเปลี่ยนแปลงของหมวดหมู่ "${nextName}" แล้ว` });
   }
 
-  function handleDelete() {
+  async function handleDelete() {
     if (order.length <= 1) {
       setBanner({ type: 'error', text: 'ต้องมีหมวดหมู่อย่างน้อย 1 รายการ ไม่สามารถลบหมวดหมู่สุดท้ายได้' });
       return;
@@ -149,25 +162,13 @@ export default function Categories() {
     // products (they'd keep pointing at a name that no longer exists in any category). Falls
     // back to "อื่นๆ" if it's still around, otherwise the first remaining category.
     const fallbackName = categories[remaining.find((id) => categories[id].name === 'อื่นๆ')]?.name || categories[remaining[0]]?.name;
-    let movedCount = 0;
-    setProducts((prev) => {
-      const next = {};
-      for (const id in prev) {
-        if (prev[id].cat === deletedName) {
-          movedCount++;
-          next[id] = { ...prev[id], cat: fallbackName };
-        } else {
-          next[id] = prev[id];
-        }
-      }
-      return movedCount ? next : prev;
-    });
-    setOrder(remaining);
-    setCategoriesRaw((prev) => {
-      const next = { ...prev };
-      delete next[selectedId];
-      return next;
-    });
+    const movedCount = await reassignCategory(deletedName, fallbackName);
+    try {
+      await deleteCategory(selectedId);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     if (remaining[0]) select(remaining[0]);
     setBanner({
       type: 'error',

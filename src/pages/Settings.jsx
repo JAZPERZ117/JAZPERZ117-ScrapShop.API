@@ -4,10 +4,18 @@ import { useSettings } from '../context/SettingsContext.jsx';
 import './Settings.css';
 
 export default function Settings() {
-  const { settings, setSettings, updateSetting } = useSettings();
+  const { settings, updateSetting, saveSettings, loaded } = useSettings();
   const [form, setForm] = useState(settings);
   const [banner, setBanner] = useState(null);
   const [dbStatus, setDbStatus] = useState('checking');
+
+  // Settings now load asynchronously from the server (see SettingsContext.jsx), so this form
+  // started out seeded with client-side defaults — re-seed it once the real values arrive,
+  // same class of fix already applied to every other migrated page this session.
+  useEffect(() => {
+    if (loaded) setForm(settings);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
 
   // A real reachability check against the auth API — this app has no actual database
   // connection to report on, but the backend going down is a real, recurring failure mode
@@ -38,8 +46,13 @@ export default function Settings() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  function handleSave() {
-    setSettings((prev) => ({ ...prev, ...form }));
+  async function handleSave() {
+    try {
+      await saveSettings(form);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     setBanner({ type: 'success', text: 'บันทึกการตั้งค่าระบบเรียบร้อยแล้ว' });
   }
 

@@ -1,9 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { IconCalendarBars, IconDownload, IconPrint, IconCategory, IconClockHistory, IconUsers } from '../icons.jsx';
 import { exportCsv } from '../lib/csvExport.js';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
-import { useCustomers, INITIAL_ORDER as CUSTOMERS_INITIAL_ORDER } from '../context/CustomersContext.jsx';
+import { useCustomers } from '../context/CustomersContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import './AnnualReport.css';
@@ -19,6 +19,29 @@ function parseWeightKg(w) {
   return parseFloat(String(w).replace(/[^\d.]/g, '')) || 0;
 }
 
+// `it.w` is a display string ("5.00 กก. × ฿10.00", or with a row deduction shown, "5.00 −
+// 1.00 = 4.00 กก. × ฿10.00") — never a bare number, so parseWeightKg's blind digit-stripping
+// concatenates the weight and price into garbage (e.g. "5.0010.00" parses as 5.001). Prefer
+// the clean `netWeight` stored alongside it on receipts created after this fix; fall back to
+// pulling it back out of the display string, same as Receipts.jsx's parseItemNetWeight.
+function parseItemNetWeight(it) {
+  if (typeof it.netWeight === 'number') return it.netWeight;
+  const w = it.w || '';
+  const afterEquals = w.includes('=') ? w.split('=')[1] : w;
+  const match = afterEquals.match(/([\d,]+\.?\d*)\s*กก\./);
+  return match ? parseFloat(match[1].replace(/,/g, '')) || 0 : 0;
+}
+
+// A receipt's item totals (it.t) only ever have that item's own row-level deduction
+// subtracted — the receipt's separate "หักน้ำหนักรวม" blanket deduction is subtracted once
+// from the whole receipt (receipts[id].total), never allocated back onto items. Summing raw
+// it.t across a receipt's items overstates revenue by exactly that blanket deduction whenever
+// one was used. Scale each item down so a receipt's items sum to its own correct total.
+function receiptItemScale(r) {
+  const itemsSum = (r.items || []).reduce((s, it) => s + parseMoney(it.t), 0);
+  return itemsSum > 0 ? parseMoney(r.total) / itemsSum : 1;
+}
+
 function money(n) {
   return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -27,19 +50,35 @@ function nowStr() {
   return new Date().toLocaleString('th-TH', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-const CURRENT_YEAR_BE = new Date().getFullYear() + 543;
+function yearLabelBE(yearAD) {
+  return yearAD + 543;
+}
+
+// Local, not UTC — matches ReceiptsContext.jsx's own todayISO(), which is what every
+// receipt's `date` field is actually stamped with.
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 export default function AnnualReport() {
   const { receipts, order: receiptOrder } = useReceipts();
   const { products } = useProducts();
-  const { order: customerOrder } = useCustomers();
+  const { order: customerOrder, customers } = useCustomers();
   const { payHistory } = usePayroll();
   const { settings } = useSettings();
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
 
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonthIndex = now.getMonth();
+  const realNow = new Date();
+  // Which year this report shows — defaults to the real current year, but the year field
+  // below lets the user pick any past year to look up instead of only ever showing "now".
+  const [currentYear, setCurrentYear] = useState(realNow.getFullYear());
+  const isViewingCurrentYear = currentYear === realNow.getFullYear();
+  // Months past "now" haven't happened yet and must render as empty/future — but that only
+  // means anything for the real current year; a past year picked from the selector is
+  // entirely in the past, so every one of its months has already fully happened.
+  const currentMonthIndex = isViewingCurrentYear ? realNow.getMonth() : 11;
+  const CURRENT_YEAR_BE = yearLabelBE(currentYear);
 
   // Every receipt now carries a real date, so the year-to-date figures and monthly chart
   // are computed directly from actual data instead of a "historical demo months + real
@@ -106,17 +145,24 @@ export default function AnnualReport() {
     .filter((p) => new Date(p.paidAt).getFullYear() === currentYear)
     .reduce((s, p) => s + (p.net || 0), 0);
   const netProfit = Math.max(ytdRevenue - wagesPaid, 0);
-  const newCustomerIds = customerOrder.filter((id) => !CUSTOMERS_INITIAL_ORDER.includes(id));
+  // "ลูกค้าใหม่ทั้งปี" means new this calendar year, not "ever added since install" — scope by
+  // actual createdAt instead of just excluding the seed customers.
+  const newCustomerIds = customerOrder.filter((id) => {
+    const createdAt = customers[id]?.createdAt;
+    return createdAt && new Date(createdAt).getFullYear() === currentYear;
+  });
 
   const breakdown = useMemo(() => {
     const byCat = {};
     for (const id of yearActiveReceipts) {
-      for (const it of receipts[id].items || []) {
+      const r = receipts[id];
+      const scale = receiptItemScale(r);
+      for (const it of r.items || []) {
         const product = Object.values(products).find((p) => p.name === it.n);
         const cat = product?.cat || 'อื่นๆ';
         if (!byCat[cat]) byCat[cat] = { weight: 0, amt: 0, Icon: product?.Icon, bg: product?.bg || 'var(--bg)', fg: product?.fg || 'var(--ink-500)' };
-        byCat[cat].weight += parseWeightKg(it.w);
-        byCat[cat].amt += parseMoney(it.t);
+        byCat[cat].weight += parseItemNetWeight(it);
+        byCat[cat].amt += parseMoney(it.t) * scale;
       }
     }
     const total = Object.values(byCat).reduce((s, c) => s + c.amt, 0) || 1;
@@ -155,10 +201,21 @@ export default function AnnualReport() {
           <div className="page-sub">ภาพรวมยอดรับซื้อและกำไรตลอดปี แยกตามไตรมาสและหมวดหมู่</div>
         </div>
         <div className="head-actions">
-          <div className="date-select">
+          <label className="date-select" style={{ cursor: 'pointer', position: 'relative' }}>
             <IconClockHistory />
             ปี {CURRENT_YEAR_BE}
-          </div>
+            <input
+              type="date"
+              value={`${currentYear}-01-01`}
+              max={todayISO()}
+              onChange={(e) => {
+                const y = Number(e.target.value.slice(0, 4));
+                if (y) setCurrentYear(y);
+              }}
+              title="เลือกวันที่ในปีที่ต้องการดูรายงาน"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', border: 'none' }}
+            />
+          </label>
           <button type="button" className="btn btn-ghost" onClick={handleExport}>
             <IconDownload />
             ส่งออก Excel

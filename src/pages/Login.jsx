@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   IconScale,
@@ -39,9 +39,6 @@ function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-function nowTimeStr() {
-  return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
-}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -49,7 +46,7 @@ export default function Login() {
   const { receipts, order: receiptOrder } = useReceipts();
   const { order: staffOrder } = usePayroll();
   const { users, setUsers } = useUsers();
-  const { settings } = useSettings();
+  const { settings, loaded: settingsLoaded } = useSettings();
 
   // "เดือนนี้" needs a real calendar-month filter — receipts persist indefinitely, so without
   // this it would silently become an all-time total once the shop's been running a while.
@@ -75,6 +72,16 @@ export default function Login() {
   // Seeded from the real "จดจำการเข้าสู่ระบบ 30 วัน" setting (Settings.jsx) instead of always
   // defaulting to true, so turning that setting off genuinely changes what happens here.
   const [remember, setRemember] = useState(settings.remember30);
+  // Settings load asynchronously from the server (see SettingsContext.jsx), so the useState
+  // above only ever captures the client-side default (true) on this page's very first render
+  // — re-seed once the real value arrives, same fix already applied to Settings.jsx itself.
+  // Without this, an owner who turned the 30-day setting OFF would still see this box checked
+  // by default on every fresh page load, and a cashier not noticing would keep sessions
+  // persisting for 30 days against the shop's actual configured policy.
+  useEffect(() => {
+    if (settingsLoaded) setRemember(settings.remember30);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoaded]);
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -114,9 +121,10 @@ export default function Login() {
 
       storeAuth(data, remember);
       const matchedId = Object.keys(users).find((id) => users[id].username === data.user.username);
+      // Store a real timestamp, not a baked "วันนี้ ..." string — otherwise every login stays
+      // labeled "today" forever, even weeks later, and "logged in today" stats never age out.
       if (matchedId) {
-        const ts = nowTimeStr();
-        setUsers((prev) => ({ ...prev, [matchedId]: { ...prev[matchedId], lastLogin: `วันนี้ ${ts}` } }));
+        setUsers((prev) => ({ ...prev, [matchedId]: { ...prev[matchedId], lastLogin: new Date().toISOString() } }));
       }
       navigate('/', { replace: true });
     } catch {
@@ -154,8 +162,7 @@ export default function Login() {
       storeAuth(data, false);
       const matchedId = Object.keys(users).find((id) => users[id].username === data.user.username);
       if (matchedId) {
-        const ts = nowTimeStr();
-        setUsers((prev) => ({ ...prev, [matchedId]: { ...prev[matchedId], lastLogin: `วันนี้ ${ts}` } }));
+        setUsers((prev) => ({ ...prev, [matchedId]: { ...prev[matchedId], lastLogin: new Date().toISOString() } }));
       }
       navigate('/', { replace: true });
     } catch {

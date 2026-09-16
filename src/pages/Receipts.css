@@ -87,3 +87,23 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+.slip-photo-view {
+  margin: 12px 0;
+}
+.slip-photo-label {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-500);
+  margin-bottom: 6px;
+}
+.slip-photo-view img {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  background: var(--bg);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  cursor: zoom-in;
+}

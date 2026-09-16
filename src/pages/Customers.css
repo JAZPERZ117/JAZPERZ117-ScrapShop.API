@@ -54,24 +54,6 @@
   height: 11px;
 }
 
-.id-photo-capture {
-  margin-bottom: 2px;
-}
-.id-photo-preview img {
-  display: block;
-  width: 100%;
-  max-height: 200px;
-  object-fit: contain;
-  background: var(--bg);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  cursor: zoom-in;
-  margin-bottom: 8px;
-}
-.id-photo-actions {
-  display: flex;
-  gap: 8px;
-}
 .profile-id-photo {
   width: 100%;
   max-height: 160px;

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   IconPrint,
   IconRefresh,
@@ -159,9 +159,42 @@ export default function PrintCenter() {
 
   const [selectedReceiptId, setSelectedReceiptId] = useState(receiptOrder[0]);
   const [selectedPayIdx, setSelectedPayIdx] = useState(0);
+  const [payslipSearchDate, setPayslipSearchDate] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState(customerOrder[0]);
   const [taxForm, setTaxForm] = useState('90');
+  // Narrows the payslip picker to payments made on a chosen date, keeping each option's
+  // real index into `payHistory` (what selectedPayIdx actually addresses) rather than a
+  // filtered-array position, so picking a narrowed option still resolves the right record.
+  const filteredPayEntries = useMemo(() => {
+    return payHistory
+      .map((p, i) => ({ p, i }))
+      .filter(({ p }) => {
+        if (!payslipSearchDate) return true;
+        const d = new Date(p.paidAt);
+        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        return iso === payslipSearchDate;
+      });
+  }, [payHistory, payslipSearchDate]);
+  // A date search can narrow the list down to entries that no longer include whatever index
+  // was previously selected — re-point to the first still-visible entry so the select and the
+  // rendered payslip stay in sync instead of silently showing a record outside the filter.
+  useEffect(() => {
+    if (filteredPayEntries.length > 0 && !filteredPayEntries.some(({ i }) => i === selectedPayIdx)) {
+      setSelectedPayIdx(filteredPayEntries[0].i);
+    }
+  }, [filteredPayEntries, selectedPayIdx]);
+  // Receipts/Customers now load asynchronously from the server, so `receiptOrder`/
+  // `customerOrder` are still empty on the very first render — the two `useState(...[0])`
+  // calls above only run once and capture undefined. Without this, renderReceiptDoc()/
+  // renderIdcardDoc() silently return null forever while "พิมพ์เอกสารนี้" stays enabled,
+  // same fix already applied to Products.jsx/Categories.jsx for this exact async-load race.
+  useEffect(() => {
+    if (!selectedReceiptId && receiptOrder.length > 0) setSelectedReceiptId(receiptOrder[0]);
+  }, [receiptOrder, selectedReceiptId]);
+  useEffect(() => {
+    if (!selectedCustomerId && customerOrder.length > 0) setSelectedCustomerId(customerOrder[0]);
+  }, [customerOrder, selectedCustomerId]);
 
   const d = DOCS[selectedId];
   const receiptPrintCount = printLog.filter((l) => l.icon === 'receipt').length;
@@ -179,7 +212,11 @@ export default function PrintCenter() {
         return receiptOrder.length > 0;
       case 'payslip':
       case 'voucher':
-        return payHistory.length > 0;
+        // A payslip date search that matches nothing must disable printing too — otherwise
+        // the "ไม่พบประวัติการจ่ายเงินเดือนวันที่เลือก" empty state shows while the print button
+        // stays enabled and would silently print whatever payslip was selected before the
+        // search, ignoring the date the user just asked to narrow down to.
+        return filteredPayEntries.length > 0;
       case 'idcard':
         return customerOrder.length > 0;
       case 'pricetag':
@@ -261,20 +298,36 @@ export default function PrintCenter() {
       case 'payslip':
       case 'voucher':
         return (
-          <div className="field">
-            <label>ประวัติการจ่ายเงินเดือน</label>
-            {payHistory.length === 0 ? (
-              <div className="empty-hint">ยังไม่มีประวัติจ่ายเงินเดือน — จ่ายเงินเดือนอย่างน้อย 1 ครั้งก่อน</div>
-            ) : (
-              <select className="input-plain" value={selectedPayIdx} onChange={(e) => setSelectedPayIdx(Number(e.target.value))}>
-                {payHistory.map((p, i) => (
-                  <option key={i} value={i}>
-                    {p.staffName} · {p.weekLabel} · {money(p.net)}
-                  </option>
-                ))}
-              </select>
+          <>
+            {payHistory.length > 0 && (
+              <div className="field">
+                <label>ค้นหาวันที่จ่าย</label>
+                <input
+                  type="date"
+                  className="input-plain"
+                  value={payslipSearchDate}
+                  max={todayISO()}
+                  onChange={(e) => setPayslipSearchDate(e.target.value)}
+                />
+              </div>
             )}
-          </div>
+            <div className="field">
+              <label>ประวัติการจ่ายเงินเดือน</label>
+              {payHistory.length === 0 ? (
+                <div className="empty-hint">ยังไม่มีประวัติจ่ายเงินเดือน — จ่ายเงินเดือนอย่างน้อย 1 ครั้งก่อน</div>
+              ) : filteredPayEntries.length === 0 ? (
+                <div className="empty-hint">ไม่พบประวัติการจ่ายเงินเดือนวันที่เลือก</div>
+              ) : (
+                <select className="input-plain" value={selectedPayIdx} onChange={(e) => setSelectedPayIdx(Number(e.target.value))}>
+                  {filteredPayEntries.map(({ p, i }) => (
+                    <option key={i} value={i}>
+                      {p.staffName} · {p.weekLabel} · {money(p.net)}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </>
         );
       case 'daily':
         return (

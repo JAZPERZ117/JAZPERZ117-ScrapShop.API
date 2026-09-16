@@ -27,7 +27,11 @@ import {
   IconTransfer,
   IconPhone,
   IconPrint,
+  IconEdit,
+  IconCheck,
 } from '../icons.jsx';
+import Modal from '../components/Modal.jsx';
+import IdPhotoCapture from '../components/IdPhotoCapture.jsx';
 import './ScrapPurchase.css';
 
 const PAY_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', promptpay: 'พร้อมเพย์' };
@@ -114,28 +118,58 @@ export default function ScrapPurchase() {
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
+  // Same บัตรประชาชน fields as the "เพิ่มลูกค้าใหม่" form on the ลูกค้า page (Customers.jsx) —
+  // a walk-in customer registered here for the first time should be captured with the same
+  // ID info, not just name/phone, so the record doesn't need a second trip through the
+  // ลูกค้า page later to fill in what could have been collected on the spot.
+  const [newCustIdNumber, setNewCustIdNumber] = useState('');
+  const [newCustIdExpiry, setNewCustIdExpiry] = useState('');
+  const [newCustIdPhoto, setNewCustIdPhoto] = useState('');
 
   const [rows, setRows] = useState([]);
 
   const [note, setNote] = useState('');
   const [scaleReading, setScaleReading] = useState(0);
   const [payMethod, setPayMethod] = useState('cash');
+  // Proof the shop actually transferred the money — only meaningful for โอนเงิน, so it's
+  // only ever attached to (and included on) a receipt paid that way.
+  const [transferSlipPhoto, setTransferSlipPhoto] = useState('');
 
   const [showDeduction, setShowDeduction] = useState(false);
   const [deductionWeight, setDeductionWeight] = useState('');
   const [deductionReasonId, setDeductionReasonId] = useState('');
   const [customReason, setCustomReason] = useState('');
+  // Optional, off by default (per-transaction — not every seller is VAT-registered) — when
+  // on, the ยอดสุทธิที่ต้องจ่าย the cashier already agreed with the seller is treated as
+  // VAT-inclusive and broken back down into its ราคาก่อน VAT + VAT 7% parts for the receipt,
+  // rather than adding 7% on top of what was actually paid.
+  const [includeVat, setIncludeVat] = useState(false);
 
   const [banner, setBanner] = useState(null);
   const [printSnapshot, setPrintSnapshot] = useState(null);
   const noteRef = useRef(null);
 
-  const [draft, setDraft] = usePersistentState('scrapshop_purchase_draft', null);
-
-  // Restore a saved draft once on mount, but only into an otherwise-empty form so it
-  // never clobbers a purchase already being entered (e.g. after a route change/refresh).
+  // Auto-close the print preview modal once the browser's own print dialog is dismissed
+  // (printed or cancelled) — 'afterprint' fires either way, so the cashier isn't left having
+  // to manually close a preview that already did its job the moment they printed or backed out.
   useEffect(() => {
-    if (!draft || rows.length > 0 || selectedCustomer) return;
+    function handleAfterPrint() {
+      setPrintSnapshot(null);
+    }
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => window.removeEventListener('afterprint', handleAfterPrint);
+  }, []);
+
+  const [draft, setDraft] = usePersistentState('scrapshop_purchase_draft', null);
+  // A saved draft used to get pulled silently into the form the moment this page loaded —
+  // now it's reviewed in a modal first (see the "มีฉบับร่างที่บันทึกไว้" banner below), so it
+  // can't ever clobber a purchase already being entered, and the cashier gets to see and edit
+  // what's in it before committing to it instead of being surprised by whatever it contained.
+  const [showDraftModal, setShowDraftModal] = useState(false);
+  const hasUnreviewedDraft = !!draft && rows.length === 0 && !selectedCustomer;
+
+  function applyDraft() {
+    if (!draft) return;
     if (draft.selectedCustomer) setSelectedCustomer(draft.selectedCustomer);
     if (draft.rows?.length) {
       setRows(
@@ -150,9 +184,21 @@ export default function ScrapPurchase() {
     if (draft.deductionReasonId) setDeductionReasonId(draft.deductionReasonId);
     if (draft.customReason) setCustomReason(draft.customReason);
     if (draft.payMethod) setPayMethod(draft.payMethod);
-    setBanner({ type: 'info', text: `กู้คืนฉบับร่างที่บันทึกไว้เมื่อ ${draft.savedAt} แล้ว` });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (draft.transferSlipPhoto) setTransferSlipPhoto(draft.transferSlipPhoto);
+    if (draft.includeVat) setIncludeVat(draft.includeVat);
+    setShowDraftModal(false);
+    setBanner({ type: 'success', text: `นำฉบับร่างที่บันทึกไว้เมื่อ ${draft.savedAt} เข้าฟอร์มแล้ว` });
+  }
+
+  function discardDraft() {
+    setDraft(null);
+    setShowDraftModal(false);
+    setBanner({ type: 'info', text: 'ละทิ้งฉบับร่างแล้ว' });
+  }
+
+  function updateDraftRow(i, field, value) {
+    setDraft((d) => ({ ...d, rows: d.rows.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)) }));
+  }
 
   const filteredCustomers = useMemo(() => {
     const q = custQuery.trim().toLowerCase();
@@ -210,6 +256,11 @@ export default function ScrapPurchase() {
   const deduction = overallDeductionMoney + rowDeductionsMoneyTotal;
   const grandTotal = Math.max(subtotal - deduction, 0);
   const deductionLabel = deductionReasonId === 'other' ? customReason.trim() : reasons[deductionReasonId]?.name || '';
+  // VAT is extracted back out of grandTotal (treated as VAT-inclusive), not added on top —
+  // the seller is still paid exactly grandTotal either way, this only splits it into the
+  // ราคาก่อน VAT / VAT 7% breakdown a tax-compliant receipt needs to show.
+  const vatAmount = includeVat ? grandTotal - grandTotal / 1.07 : 0;
+  const vatExclusiveTotal = grandTotal - vatAmount;
 
   function updateRow(id, field, value) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
@@ -263,7 +314,10 @@ export default function ScrapPurchase() {
   }
 
   function addBlankRow() {
-    setRows((prev) => [...prev, { id: nextRowId++, name: 'รายการใหม่', icon: IconBox, bg: 'var(--bg)', fg: 'var(--ink-500)', price: '', weight: '' }]);
+    // Computed outside the updater — StrictMode double-invokes updaters in dev, so
+    // incrementing nextRowId inside it would burn two ids per click instead of one.
+    const id = nextRowId++;
+    setRows((prev) => [...prev, { id, name: 'รายการใหม่', icon: IconBox, bg: 'var(--bg)', fg: 'var(--ink-500)', price: '', weight: '' }]);
   }
 
   function selectCustomer(c) {
@@ -271,19 +325,32 @@ export default function ScrapPurchase() {
     setCustQuery('');
   }
 
-  function handleCreateCustomer(e) {
+  async function handleCreateCustomer(e) {
     e.preventDefault();
     if (!newCustName.trim() || !newCustPhone.trim()) return;
-    const created = addCustomer({ name: newCustName.trim(), phone: newCustPhone.trim() });
-    setSelectedCustomer(created);
-    setNewCustName('');
-    setNewCustPhone('');
-    setShowNewCustomer(false);
+    try {
+      const created = await addCustomer({
+        name: newCustName.trim(),
+        phone: newCustPhone.trim(),
+        idNumber: newCustIdNumber.trim(),
+        idExpiry: newCustIdExpiry,
+        idPhoto: newCustIdPhoto,
+      });
+      setSelectedCustomer(created);
+      setNewCustName('');
+      setNewCustPhone('');
+      setNewCustIdNumber('');
+      setNewCustIdExpiry('');
+      setNewCustIdPhoto('');
+      setShowNewCustomer(false);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+    }
   }
 
   function pullWeight() {
-    if (mainScale.status !== 'on') {
-      setBanner({ type: 'error', text: `${mainScale.name} ไม่ได้เชื่อมต่ออยู่ — ไปที่หน้า "เครื่องชั่ง" เพื่อเชื่อมต่อก่อน` });
+    if (!mainScale || mainScale.status !== 'on') {
+      setBanner({ type: 'error', text: `${mainScale?.name || 'เครื่องชั่ง'} ไม่ได้เชื่อมต่ออยู่ — ไปที่หน้า "เครื่องชั่ง" เพื่อเชื่อมต่อก่อน` });
       return;
     }
     if (rows.length === 0) {
@@ -311,6 +378,8 @@ export default function ScrapPurchase() {
     setCustomReason('');
     setShowDeduction(false);
     setPayMethod('cash');
+    setTransferSlipPhoto('');
+    setIncludeVat(false);
     setDraftNo(makeDraftNo());
     setDraft(null);
   }
@@ -335,11 +404,13 @@ export default function ScrapPurchase() {
       deductionReasonId,
       customReason,
       payMethod,
+      transferSlipPhoto,
+      includeVat,
     });
-    setBanner({ type: 'success', text: 'บันทึกฉบับร่างเรียบร้อยแล้ว — ระบบจะดึงกลับมาให้อัตโนมัติเมื่อเปิดหน้านี้ครั้งถัดไป' });
+    setBanner({ type: 'success', text: 'บันทึกฉบับร่างเรียบร้อยแล้ว — ครั้งถัดไปที่เปิดหน้านี้จะมีให้ตรวจสอบก่อนนำเข้าฟอร์ม' });
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (rows.length === 0 || totalWeight <= 0) {
       setBanner({ type: 'error', text: 'กรุณาเพิ่มรายการสินค้าและระบุน้ำหนักก่อนบันทึก' });
       return;
@@ -351,7 +422,11 @@ export default function ScrapPurchase() {
     const receiptNo = 'RC' + Date.now().toString().slice(-9);
     const user = getStoredAuth();
     const timeStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
-    setPrintSnapshot({
+    // Built ahead of the actual save so the try block below can show it immediately once
+    // addReceipt succeeds — but NOT shown to the user until then. Setting printSnapshot before
+    // a save that can still fail would pop up a "receipt" (printable, reprintable) for a sale
+    // that was never actually recorded, right alongside the error banner from the catch below.
+    const snapshot = {
       no: receiptNo,
       time: timeStr,
       date: todayThaiDate(),
@@ -373,57 +448,83 @@ export default function ScrapPurchase() {
       grandTotal,
       payMethod,
       note: note.trim(),
-    });
-    addReceipt({
-      no: receiptNo,
-      time: timeStr,
-      cust: cust.name,
-      // Receipts previously only stored the customer's name — voiding one had no reliable
-      // way to find which customer record to reverse recordPurchase's effect on. Kept
-      // alongside `cust` (the display name) rather than replacing it. Walk-in sales
-      // legitimately have no id — that's fine, there's no customer ledger to reverse.
-      custId: selectedCustomer?.id || null,
-      init: cust.init || initials(cust.name),
-      bg: cust.bg || 'var(--green-100)',
-      fg: cust.fg || 'var(--green-700)',
-      status: 'ok',
-      weight: totalWeight.toFixed(2) + ' กก.',
-      deductionWeight: totalDeductionWeight,
-      deductionLabel,
-      note: note.trim(),
-      method: PAY_LABELS[payMethod],
-      items: rows.map((r) => ({
-        n: r.name,
-        w:
-          rowDeductionWeight(r) > 0
-            ? `${rowWeight(r).toFixed(2)} − ${rowDeductionWeight(r).toFixed(2)} = ${rowNetWeight(r).toFixed(2)} กก. × ${money(rowPrice(r))}`
-            : `${rowWeight(r).toFixed(2)} กก. × ${money(rowPrice(r))}`,
-        // Kept as a real number alongside the display string `w` above — voiding a receipt
-        // needs the exact net weight added to stock per product, and parsing it back out of
-        // the formatted string would be fragile.
-        netWeight: rowNetWeight(r),
-        t: money(rowNetTotal(r)),
-      })),
-      total: money(grandTotal),
-      // Which deduction reasons this receipt actually incremented usage on, and by how much —
-      // voiding the receipt needs this to call decrementUsage the same number of times with
-      // the same amounts, or the reason's "ใช้แล้ว N ครั้ง"/ยอดหักรวม would stay inflated forever.
-      deductionUsage: [
-        ...(deductionReasonId && overallDeductionWeight > 0 ? [{ id: deductionReasonId, amount: overallDeductionMoney }] : []),
-        ...rows
-          .filter((r) => r.deductionReasonId && rowDeductionWeight(r) > 0)
-          .map((r) => ({ id: r.deductionReasonId, amount: rowDeductionMoney(r) })),
-      ],
-    });
+      slipPhoto: payMethod === 'transfer' ? transferSlipPhoto : '',
+      vatIncluded: includeVat,
+      vatAmount,
+    };
+    try {
+      await addReceipt({
+        no: receiptNo,
+        time: timeStr,
+        cust: cust.name,
+        // Receipts previously only stored the customer's name — voiding one had no reliable
+        // way to find which customer record to reverse recordPurchase's effect on. Kept
+        // alongside `cust` (the display name) rather than replacing it. Walk-in sales
+        // legitimately have no id — that's fine, there's no customer ledger to reverse.
+        custId: selectedCustomer?.id || null,
+        // The Receipts.jsx preview panel used to just hardcode "เจ้าของร้าน" here regardless of
+        // who was actually logged in — persist the real issuer name onto the receipt itself,
+        // same fallback as the print snapshot below.
+        issuedBy: user?.displayName || 'เจ้าของร้าน',
+        init: cust.init || initials(cust.name),
+        bg: cust.bg || 'var(--green-100)',
+        fg: cust.fg || 'var(--green-700)',
+        status: 'ok',
+        weight: totalWeight.toFixed(2) + ' กก.',
+        deductionWeight: totalDeductionWeight,
+        deductionLabel,
+        note: note.trim(),
+        method: PAY_LABELS[payMethod],
+        slipPhoto: payMethod === 'transfer' ? transferSlipPhoto : '',
+        vatIncluded: includeVat,
+        vatAmount,
+        items: rows.map((r) => ({
+          n: r.name,
+          w:
+            rowDeductionWeight(r) > 0
+              ? `${rowWeight(r).toFixed(2)} − ${rowDeductionWeight(r).toFixed(2)} = ${rowNetWeight(r).toFixed(2)} กก. × ${money(rowPrice(r))}`
+              : `${rowWeight(r).toFixed(2)} กก. × ${money(rowPrice(r))}`,
+          // Kept as a real number alongside the display string `w` above — voiding a receipt
+          // needs the exact net weight added to stock per product, and parsing it back out of
+          // the formatted string would be fragile.
+          netWeight: rowNetWeight(r),
+          t: money(rowNetTotal(r)),
+          // Snapshot the product's category at purchase time — Categories.jsx sums revenue per
+          // category from receipt history, and deriving the category from the live product list
+          // instead would make a product's entire purchase history vanish from its category's
+          // stats the moment that product gets deleted, even though nothing about the past
+          // receipts changed.
+          cat: Object.values(products).find((p) => p.name === r.name)?.cat || null,
+        })),
+        total: money(grandTotal),
+        // Which deduction reasons this receipt actually incremented usage on, and by how much —
+        // voiding the receipt needs this to call decrementUsage the same number of times with
+        // the same amounts, or the reason's "ใช้แล้ว N ครั้ง"/ยอดหักรวม would stay inflated forever.
+        // The amount tracked is the WEIGHT deducted (กก.), never money — "หักน้ำหนัก/เหตุผล"
+        // deducts weight directly, so a reason's cumulative total must stay in the same unit
+        // instead of a price-dependent money figure that has no fixed relationship to it.
+        deductionUsage: [
+          ...(deductionReasonId && overallDeductionWeight > 0 ? [{ id: deductionReasonId, amount: overallDeductionWeight }] : []),
+          ...rows
+            .filter((r) => r.deductionReasonId && rowDeductionWeight(r) > 0)
+            .map((r) => ({ id: r.deductionReasonId, amount: rowDeductionWeight(r) })),
+        ],
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    setPrintSnapshot(snapshot);
     // Record real usage against each deduction reason actually applied on this receipt —
-    // both the overall reason and any per-row reasons — so the "ใช้แล้ว N ครั้ง" / total
-    // figures on the หักน้ำหนัก/เหตุผล page reflect real activity, not frozen seed numbers.
+    // both the overall reason and any per-row reasons — so the "ใช้แล้ว N ครั้ง" / ยอดหักรวม
+    // figures on the หักน้ำหนัก/เหตุผล page reflect real weight-deducted activity, not frozen
+    // seed numbers or a money-equivalent that drifts from the weight as prices change.
     if (deductionReasonId && overallDeductionWeight > 0) {
-      incrementUsage(deductionReasonId, overallDeductionMoney);
+      incrementUsage(deductionReasonId, overallDeductionWeight);
     }
     for (const r of rows) {
       if (r.deductionReasonId && rowDeductionWeight(r) > 0) {
-        incrementUsage(r.deductionReasonId, rowDeductionMoney(r));
+        incrementUsage(r.deductionReasonId, rowDeductionWeight(r));
       }
     }
     // Update the customer's real cumulative weight/spend/visit history, and add the net
@@ -473,6 +574,95 @@ export default function ScrapPurchase() {
         </div>
       )}
 
+      {hasUnreviewedDraft && (
+        <div className="page-banner banner-info">
+          <span>มีฉบับร่างที่บันทึกไว้เมื่อ {draft.savedAt}</span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="btn btn-ghost" style={{ padding: '5px 12px' }} onClick={() => setShowDraftModal(true)}>
+              <IconEdit style={{ width: 14, height: 14 }} />
+              แก้ไขฉบับร่าง
+            </button>
+            <button type="button" className="btn btn-ghost" style={{ padding: '5px 12px' }} onClick={discardDraft}>
+              <IconTrash style={{ width: 14, height: 14 }} />
+              ละทิ้งฉบับร่าง
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showDraftModal && draft && (
+        <Modal title="แก้ไขฉบับร่างก่อนนำเข้า" onClose={() => setShowDraftModal(false)}>
+          <div className="paper edit-mode">
+            <div className="field">
+              <label>ลูกค้า</label>
+              <div className="input-plain" style={{ background: 'var(--bg)', cursor: 'default' }}>
+                {draft.selectedCustomer?.name || 'ลูกค้าขาจร (ยังไม่ได้เลือก)'}
+              </div>
+            </div>
+
+            <div className="field">
+              <label>รายการสินค้า</label>
+              {(!draft.rows || draft.rows.length === 0) && <div className="empty-hint">ยังไม่มีรายการสินค้าในฉบับร่างนี้</div>}
+              {(draft.rows || []).map((r, i) => (
+                <div className="edit-item-row" key={i}>
+                  <input className="input-plain" placeholder="ชื่อสินค้า" value={r.name} onChange={(e) => updateDraftRow(i, 'name', e.target.value)} />
+                  <div className="edit-item-sub">
+                    <input
+                      className="input-plain"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="น้ำหนัก กก."
+                      value={r.weight}
+                      onChange={(e) => updateDraftRow(i, 'weight', e.target.value)}
+                    />
+                    <input
+                      className="input-plain"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="ราคา/กก."
+                      value={r.price}
+                      onChange={(e) => updateDraftRow(i, 'price', e.target.value)}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="field">
+              <label>หมายเหตุ</label>
+              <input className="input-plain" value={draft.note || ''} onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))} />
+            </div>
+
+            <div className="field">
+              <label>วิธีจ่ายเงิน</label>
+              <select className="input-plain" value={draft.payMethod || 'cash'} onChange={(e) => setDraft((d) => ({ ...d, payMethod: e.target.value }))}>
+                <option value="cash">เงินสด</option>
+                <option value="transfer">โอนเงิน</option>
+                <option value="promptpay">พร้อมเพย์</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="receipt-actions">
+            <button type="button" className="btn btn-primary btn-block" onClick={applyDraft}>
+              <IconCheck />
+              นำเข้าฟอร์ม
+            </button>
+            <div className="action-row">
+              <button type="button" className="btn btn-ghost btn-block" onClick={() => setShowDraftModal(false)}>
+                ปิด
+              </button>
+              <button type="button" className="btn btn-danger-ghost btn-block" onClick={discardDraft}>
+                <IconTrash />
+                ละทิ้งฉบับร่าง
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       <div className="grid">
         {/* ===== LEFT: form ===== */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -513,9 +703,20 @@ export default function ScrapPurchase() {
             </div>
 
             {showNewCustomer && (
-              <form className="new-cust-form" onSubmit={handleCreateCustomer}>
+              <form className="new-cust-form" onSubmit={handleCreateCustomer} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                 <input type="text" placeholder="ชื่อลูกค้า" value={newCustName} onChange={(e) => setNewCustName(e.target.value)} required />
                 <input type="text" placeholder="เบอร์โทรศัพท์" value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} required />
+                <IdPhotoCapture value={newCustIdPhoto} onChange={setNewCustIdPhoto} onError={(msg) => setBanner({ type: 'error', text: msg })} />
+                <input
+                  type="text"
+                  placeholder="เลขบัตรประชาชน (ดูจากรูปที่ถ่าย)"
+                  value={newCustIdNumber}
+                  onChange={(e) => setNewCustIdNumber(e.target.value)}
+                />
+                <div className="field">
+                  <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>วันหมดอายุบัตรประชาชน</label>
+                  <input type="date" className="input-plain" value={newCustIdExpiry} onChange={(e) => setNewCustIdExpiry(e.target.value)} />
+                </div>
                 <button type="submit" className="btn btn-primary">
                   บันทึก
                 </button>
@@ -689,14 +890,14 @@ export default function ScrapPurchase() {
                   <IconScale />
                 </div>
                 <div>
-                  <div className="scale-label">น้ำหนักจากเครื่องชั่งดิจิทัล ({mainScale.name})</div>
+                  <div className="scale-label">น้ำหนักจากเครื่องชั่งดิจิทัล ({mainScale?.name || '—'})</div>
                   <div className="scale-reading">
                     {scaleReading.toFixed(2)}
                     <span className="u">กก.</span>
                   </div>
                   <div className="scale-status">
-                    <span className="scale-dot" style={{ background: mainScale.status === 'on' ? undefined : 'var(--ink-300)' }}></span>
-                    {mainScale.status === 'on' ? 'เชื่อมต่อแล้ว' : 'ไม่ได้เชื่อมต่อ'} · พอร์ต {mainScale.port}
+                    <span className="scale-dot" style={{ background: mainScale?.status === 'on' ? undefined : 'var(--ink-300)' }}></span>
+                    {mainScale?.status === 'on' ? 'เชื่อมต่อแล้ว' : 'ไม่ได้เชื่อมต่อ'} · พอร์ต {mainScale?.port || '—'}
                   </div>
                 </div>
               </div>
@@ -784,6 +985,25 @@ export default function ScrapPurchase() {
               </div>
             )}
 
+            <div className="sum-row">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <input type="checkbox" checked={includeVat} onChange={(e) => setIncludeVat(e.target.checked)} />
+                <span className="label">ระบุภาษีมูลค่าเพิ่ม (VAT 7%)</span>
+              </label>
+            </div>
+            {includeVat && (
+              <>
+                <div className="sum-row">
+                  <span className="label">ราคาก่อน VAT</span>
+                  <span className="val">{money(vatExclusiveTotal)}</span>
+                </div>
+                <div className="sum-row">
+                  <span className="label">VAT 7%</span>
+                  <span className="val">{money(vatAmount)}</span>
+                </div>
+              </>
+            )}
+
             <div className="grand-total">
               <span className="label">ยอดสุทธิที่ต้องจ่าย</span>
               <span className="val">{money(grandTotal)}</span>
@@ -806,6 +1026,20 @@ export default function ScrapPurchase() {
                 </div>
               </div>
             </div>
+
+            {payMethod === 'transfer' && (
+              <div style={{ marginTop: 14 }}>
+                <label className="pay-label">สลิปโอนเงิน (ไม่บังคับ)</label>
+                <IdPhotoCapture
+                  value={transferSlipPhoto}
+                  onChange={setTransferSlipPhoto}
+                  onError={(msg) => setBanner({ type: 'error', text: msg })}
+                  label="แนบรูปสลิปโอนเงิน"
+                  retakeLabel="แนบรูปใหม่"
+                  alt="สลิปโอนเงิน"
+                />
+              </div>
+            )}
 
             <div className="submit-stack">
               <button type="button" className="btn btn-primary btn-block" onClick={handleSubmit}>
@@ -849,7 +1083,7 @@ export default function ScrapPurchase() {
       </div>
 
       {printSnapshot && (
-        <div className="hidden-until-print">
+        <Modal title={`ใบเสร็จ ${printSnapshot.no}`} onClose={() => setPrintSnapshot(null)}>
           <div className="paper">
             <div className="paper-top">
               <div className="paper-shop">{settings.shopName}</div>
@@ -909,6 +1143,18 @@ export default function ScrapPurchase() {
               <span>หักน้ำหนัก/เหตุผล{printSnapshot.deductionLabel ? ` (${printSnapshot.deductionLabel})` : ''}</span>
               <b>−{printSnapshot.totalDeductionWeight.toFixed(2)} กก.</b>
             </div>
+            {printSnapshot.vatIncluded && (
+              <>
+                <div className="paper-meta">
+                  <span>ราคาก่อน VAT</span>
+                  <b>{money(printSnapshot.grandTotal - printSnapshot.vatAmount)}</b>
+                </div>
+                <div className="paper-meta">
+                  <span>VAT 7% (รวมในราคาแล้ว)</span>
+                  <b>{money(printSnapshot.vatAmount)}</b>
+                </div>
+              </>
+            )}
 
             <div className="paper-total-row">
               <span className="l">ยอดรวมสุทธิ</span>
@@ -936,7 +1182,17 @@ export default function ScrapPurchase() {
               {settings.receiptFooter}
             </div>
           </div>
-        </div>
+
+          <div className="receipt-actions">
+            <button type="button" className="btn btn-primary btn-block" onClick={() => window.print()}>
+              <IconPrint />
+              พิมพ์อีกครั้ง
+            </button>
+            <button type="button" className="btn btn-ghost btn-block" onClick={() => setPrintSnapshot(null)}>
+              ปิด
+            </button>
+          </div>
+        </Modal>
       )}
     </>
   );

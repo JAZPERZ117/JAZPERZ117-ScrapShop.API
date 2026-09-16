@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { exportCsv } from '../lib/csvExport.js';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
@@ -19,6 +19,7 @@ import {
   IconEdit,
 } from '../icons.jsx';
 import RowMenu from '../components/RowMenu.jsx';
+import Modal from '../components/Modal.jsx';
 import './Receipts.css';
 
 function parseMoney(s) {
@@ -75,18 +76,41 @@ function parseItemLine(w) {
 
 export default function Receipts() {
   const navigate = useNavigate();
-  const { receipts, setReceipts, order } = useReceipts();
+  const { receipts, order, voidReceipt, updateReceipt } = useReceipts();
   const { settings } = useSettings();
-  const { reversePurchase } = useCustomers();
-  const { removeStockByName } = useProducts();
+  const { reversePurchase, recordPurchase } = useCustomers();
+  const { removeStockByName, addStock } = useProducts();
   const { decrementUsage } = useDeductions();
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [dateFilter, setDateFilter] = useState('');
   const [selectedId, setSelectedId] = useState(order[0]);
+  // Receipts now load asynchronously from the server (see ReceiptsContext.jsx), so `order` is
+  // still empty on the very first render — the `useState(order[0])` above only runs once and
+  // captures `undefined`. Once the fetch resolves and receipts actually exist, point selection
+  // at the first one; every action below (edit, void, print) silently no-ops on an id that
+  // isn't in `receipts`, so without this the whole page looks broken until something else
+  // happens to call setSelectedId.
+  useEffect(() => {
+    if (!selectedId && order.length > 0) setSelectedId(order[0]);
+  }, [order, selectedId]);
   const [banner, setBanner] = useState(null);
+  // Below ~1100px the list and preview panel stack vertically instead of sitting side by
+  // side (see .grid's media query in common.css) — on that layout, clicking "ดูตัวอย่าง"/
+  // "แก้ไขใบเสร็จ"/"ยกเลิกใบเสร็จ" only updates the panel's content, which can sit well below
+  // the table and off-screen, looking like the click did nothing. Scroll it into view on
+  // every such action so the result is always visible regardless of viewport width.
+  const previewRef = useRef(null);
+  function scrollToPreview() {
+    previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
   const [activity, setActivity] = usePersistentState('scrapshop_receipts_activity', []);
   const [printedIds, setPrintedIds] = usePersistentState('scrapshop_receipts_printed_ids', []);
+  // Separate, timestamped log for the "พิมพ์ซ้ำเดือนนี้" stat — `activity` below is a generic
+  // feed capped at 10 entries across every action type (voids, edits, prints), so reusing it
+  // for a monthly print count would silently undercount once 10 actions of any kind pile up,
+  // and never actually filtered by month to begin with.
+  const [printLog, setPrintLog] = usePersistentState('scrapshop_receipts_print_log', []);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState(null);
 
@@ -137,7 +161,13 @@ export default function Receipts() {
   }, [order, receipts]);
   const monthCount = monthActiveOrder.length;
   const monthTotal = monthActiveOrder.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
-  const reprintCount = activity.filter((a) => a.text.startsWith('พิมพ์ซ้ำ') || a.text.startsWith('ดาวน์โหลด')).length;
+  const reprintCount = useMemo(() => {
+    const now = new Date();
+    return printLog.filter((iso) => {
+      const d = new Date(iso);
+      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    }).length;
+  }, [printLog]);
   const reprintFromCount = printedIds.length;
   const voidTotal = useMemo(
     () => monthVoidedIds.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0),
@@ -148,7 +178,7 @@ export default function Receipts() {
     setActivity((prev) => [{ text, time: nowTimeStr() }, ...prev].slice(0, 10));
   }
 
-  function handleVoid(id = selectedId) {
+  async function handleVoid(id = selectedId) {
     const target = receipts[id];
     if (target.status === 'void') return;
     if (!window.confirm(`ยืนยันยกเลิกใบเสร็จ ${target.no}?`)) return;
@@ -159,7 +189,15 @@ export default function Receipts() {
       setIsEditing(false);
       setEditForm(null);
     }
-    setReceipts((prev) => ({ ...prev, [id]: { ...prev[id], status: 'void', voidedAt: Date.now() } }));
+    // Voiding from the row menu can target a receipt other than the one currently shown in
+    // the preview panel — select it so the panel reflects the receipt that was just voided.
+    setSelectedId(id);
+    try {
+      await voidReceipt(id);
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
     // A voided purchase never happened, so give back what it took: the stock it added
     // (matched by item name, mirroring how ScrapPurchase.jsx's addStock looked it up) and
     // the customer's lifetime weight/spend/visit bump (only possible for receipts that
@@ -176,19 +214,22 @@ export default function Receipts() {
     }
     logActivity(`ยกเลิก ${target.no}`);
     setBanner({ type: 'error', text: `ยกเลิกใบเสร็จ ${target.no} แล้ว — คืนสต็อกสินค้าและยอดสะสมลูกค้าที่เกี่ยวข้องแล้ว` });
+    scrollToPreview();
   }
 
+  // Used to be two separate buttons ("พิมพ์ใบเสร็จ" / "ดาวน์โหลด PDF") that both did exactly
+  // this — window.print() lets the user pick a real printer or "Save as PDF" either way.
+  // Splitting it in two meant a second window.print() call shortly after the first could get
+  // silently ignored by the browser's own popup/print-dialog throttling (Chrome does this to
+  // stop pages from spamming print dialogs) — the banner below would still show since the rest
+  // of the function ran fine, but no dialog ever appeared, which looked like "the button is
+  // broken" with nothing in the console to explain why. One button removes the chance of that
+  // ever happening from this page.
   function handlePrint() {
     setPrintedIds((prev) => (prev.includes(selectedId) ? prev : [...prev, selectedId]));
-    logActivity(`พิมพ์ซ้ำ ${selected.no}`);
-    setBanner({ type: 'success', text: `ส่งพิมพ์ใบเสร็จ ${selected.no} ไปยังเครื่องพิมพ์แล้ว` });
-    window.print();
-  }
-
-  function handleDownloadPdf() {
-    setPrintedIds((prev) => (prev.includes(selectedId) ? prev : [...prev, selectedId]));
-    logActivity(`ดาวน์โหลด PDF ${selected.no}`);
-    setBanner({ type: 'success', text: `เปิดหน้าต่างพิมพ์ใบเสร็จ ${selected.no} แล้ว — เลือก "บันทึกเป็น PDF" เพื่อดาวน์โหลด` });
+    setPrintLog((prev) => [...prev, new Date().toISOString()]);
+    logActivity(`พิมพ์ใบเสร็จ ${selected.no}`);
+    setBanner({ type: 'success', text: `เปิดหน้าต่างพิมพ์ใบเสร็จ ${selected.no} แล้ว — เลือกเครื่องพิมพ์ หรือ "บันทึกเป็น PDF" เพื่อดาวน์โหลด` });
     window.print();
   }
 
@@ -206,6 +247,7 @@ export default function Receipts() {
   function selectRow(id) {
     if (isEditing && id !== editForm?.id) setIsEditing(false);
     setSelectedId(id);
+    scrollToPreview();
   }
 
   function startEdit(id = selectedId) {
@@ -240,6 +282,9 @@ export default function Receipts() {
       deductionWeight: deductionWeight.toFixed(2),
       deductionLabel: r.deductionLabel || '',
     });
+    // No scrollToPreview() here — the edit form now opens as a fixed-position modal (see
+    // Modal.jsx), so it's already fully visible regardless of scroll position or viewport
+    // width, unlike when it used to swap in over the side panel in place.
     setIsEditing(true);
   }
 
@@ -265,7 +310,7 @@ export default function Receipts() {
   const editDeductionMoney = editDeductionWeight * editBlendedPrice;
   const editGrandTotal = Math.max(editSubtotal - editDeductionMoney, 0);
 
-  function saveEdit() {
+  async function saveEdit() {
     if (receipts[editForm.id]?.status === 'void') {
       setBanner({ type: 'error', text: `ใบเสร็จ ${receipts[editForm.id]?.no} ถูกยกเลิกไปแล้ว ไม่สามารถบันทึกการแก้ไขได้` });
       setIsEditing(false);
@@ -286,12 +331,13 @@ export default function Receipts() {
     const newItems = validItems.map((it) => {
       const w = parseFloat(it.weight) || 0;
       const p = parseFloat(it.price) || 0;
-      return { n: it.name.trim(), w: `${w.toFixed(2)} กก. × ${money(p)}`, t: money(w * p) };
+      // Keep the real net weight as a number alongside the display string, same as a receipt
+      // created fresh in ScrapPurchase.jsx — otherwise a later void on this edited receipt
+      // would have to fall back to regex-parsing the weight back out of the display string.
+      return { n: it.name.trim(), w: `${w.toFixed(2)} กก. × ${money(p)}`, netWeight: w, t: money(w * p) };
     });
-    setReceipts((prev) => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
+    try {
+      await updateReceipt(id, {
         cust: editForm.cust.trim(),
         init: initials(editForm.cust.trim()),
         method: editForm.method,
@@ -301,10 +347,30 @@ export default function Receipts() {
         deductionWeight: editDeductionWeight,
         deductionLabel: editForm.deductionLabel.trim(),
         total: money(editGrandTotal),
-      },
-    }));
+      });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    // Editing a receipt's items/weights must keep stock and the customer's lifetime totals in
+    // sync — reverse exactly what the original items/total added, then apply the edited ones,
+    // the same inverse-then-reapply shape handleVoid already uses for a full cancellation.
+    // Without this, stock and customer figures stay frozen at the pre-edit numbers, silently
+    // diverging from what the (now-edited) receipt says. Deduction usage isn't touched here:
+    // the edit form doesn't track which deduction reason id was originally applied, so there's
+    // no reliable way to recompute it — it's left exactly as the original receipt recorded it.
+    for (const it of original.items || []) {
+      removeStockByName(it.n, parseItemNetWeight(it));
+    }
+    for (const it of validItems) {
+      addStock(it.name.trim(), parseFloat(it.weight) || 0, parseFloat(it.price) || 0);
+    }
+    if (original.custId) {
+      reversePurchase(original.custId, { weightKg: parseWeightKg(original.weight), amount: parseMoney(original.total), receiptNo: original.no });
+      recordPurchase(original.custId, { weightKg: editTotalWeight, amount: editGrandTotal, receiptNo: original.no, timeStr: nowTimeStr() });
+    }
     logActivity(`แก้ไขใบเสร็จ ${original.no}`);
-    setBanner({ type: 'success', text: `บันทึกการแก้ไขใบเสร็จ ${original.no} แล้ว` });
+    setBanner({ type: 'success', text: `บันทึกการแก้ไขใบเสร็จ ${original.no} แล้ว — ปรับสต็อกสินค้าและยอดสะสมลูกค้าให้ตรงกับรายการที่แก้ไขแล้ว` });
     setIsEditing(false);
     setEditForm(null);
   }
@@ -506,7 +572,7 @@ export default function Receipts() {
           </div>
         </div>
 
-        <div className="summary-sticky">
+        <div className="summary-sticky" ref={previewRef}>
           <div className="receipt-shell">
             {!selected ? (
               <div className="empty-hint" style={{ padding: '40px 20px', textAlign: 'center' }}>
@@ -518,24 +584,144 @@ export default function Receipts() {
               <div className="receipt-title-row">
                 <div className="card-title">
                   <IconReceipt />
-                  {isEditing ? `แก้ไขใบเสร็จ ${receipts[editForm.id]?.no}` : 'ตัวอย่างใบเสร็จ'}
+                  ตัวอย่างใบเสร็จ
                 </div>
-                {!isEditing &&
-                  (selectedStatus === 'ok' ? (
-                    <span className="badge badge-green">
-                      <IconCheck />
-                      ปกติ
-                    </span>
-                  ) : (
-                    <span className="badge badge-rose">
-                      <IconX />
-                      ยกเลิก
-                    </span>
-                  ))}
+                {selectedStatus === 'ok' ? (
+                  <span className="badge badge-green">
+                    <IconCheck />
+                    ปกติ
+                  </span>
+                ) : (
+                  <span className="badge badge-rose">
+                    <IconX />
+                    ยกเลิก
+                  </span>
+                )}
               </div>
             </div>
 
-            {isEditing ? (
+            <div className="paper">
+                <div className="paper-top">
+                  <div className="paper-shop">{settings.shopName}</div>
+                  <div className="paper-addr">
+                    {settings.address}
+                    <br />
+                    โทร. {settings.phone} &nbsp;|&nbsp; เลขผู้เสียภาษี {settings.taxId}
+                  </div>
+                </div>
+                <hr className="paper-divider" />
+                <div className="paper-meta">
+                  <span>เลขที่ใบเสร็จ</span>
+                  <b>{selected.no}</b>
+                </div>
+                <div className="paper-meta">
+                  <span>วันที่</span>
+                  <b>{formatThaiDate(selected.date)} · {selected.time}</b>
+                </div>
+                <div className="paper-meta">
+                  <span>ลูกค้า</span>
+                  <b>{selected.cust}</b>
+                </div>
+                <div className="paper-meta">
+                  <span>ผู้ออกใบเสร็จ</span>
+                  <b>{selected.issuedBy || 'เจ้าของร้าน'}</b>
+                </div>
+                <hr className="paper-divider" />
+
+                <div className="paper-items">
+                  {selected.items.map((it, i) => (
+                    <div className="paper-item" key={i}>
+                      <div className="pn">
+                        {it.n}
+                        <span className="pw">{it.w}</span>
+                      </div>
+                      <div className="pt">{it.t}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="paper-meta">
+                  <span>น้ำหนักรวม</span>
+                  <b>{selected.weight}</b>
+                </div>
+                <div className="paper-meta">
+                  <span>หักน้ำหนัก/เหตุผล{selected.deductionLabel ? ` (${selected.deductionLabel})` : ''}</span>
+                  <b>−{(selected.deductionWeight || 0).toFixed(2)} กก.</b>
+                </div>
+                {selected.vatIncluded && (
+                  <>
+                    <div className="paper-meta">
+                      <span>ราคาก่อน VAT</span>
+                      <b>{money(parseMoney(selected.total) - (selected.vatAmount || 0))}</b>
+                    </div>
+                    <div className="paper-meta">
+                      <span>VAT 7% (รวมในราคาแล้ว)</span>
+                      <b>{money(selected.vatAmount || 0)}</b>
+                    </div>
+                  </>
+                )}
+
+                <div className="paper-total-row">
+                  <span className="l">ยอดรวมสุทธิ</span>
+                  <span className="v">{selected.total}</span>
+                </div>
+                <div className="paper-meta" style={{ marginTop: 8 }}>
+                  <span>วิธีจ่ายเงิน</span>
+                  <b>{selected.method}</b>
+                </div>
+                {selected.note && (
+                  <div className="paper-meta" style={{ marginTop: 8 }}>
+                    <span>หมายเหตุ</span>
+                    <b>{selected.note}</b>
+                  </div>
+                )}
+
+                <div className="paper-barcode">
+                  {Array.from({ length: 18 }).map((_, i) => (
+                    <span key={i} style={{ height: 34, width: (i % 3) + 1 }}></span>
+                  ))}
+                </div>
+                <div className="paper-foot">
+                  {selected.no}
+                  <br />
+                  {settings.receiptFooter}
+                </div>
+              </div>
+
+            {selected.slipPhoto && (
+              // Shown here, not inside .paper above — this is the shop's own proof-of-payment
+              // record, not something that belongs on the customer's printed copy of the receipt.
+              <div className="slip-photo-view">
+                <span className="slip-photo-label">สลิปโอนเงิน</span>
+                <img
+                  src={selected.slipPhoto}
+                  alt="สลิปโอนเงิน"
+                  onClick={() => window.open(selected.slipPhoto, '_blank')}
+                  title="กดเพื่อดูขนาดเต็ม"
+                />
+              </div>
+            )}
+
+            <div className="receipt-actions">
+              <button type="button" className="btn btn-primary btn-block" onClick={handlePrint}>
+                <IconPrint />
+                พิมพ์ / บันทึกเป็น PDF
+              </button>
+              <button type="button" className="btn btn-ghost btn-block" onClick={() => startEdit()} disabled={selectedStatus === 'void'}>
+                <IconEdit />
+                แก้ไขใบเสร็จ
+              </button>
+              <button type="button" className="btn btn-danger-ghost btn-block" onClick={() => handleVoid()} disabled={selectedStatus === 'void'}>
+                <IconTrash />
+                ยกเลิกใบเสร็จ
+              </button>
+            </div>
+              </>
+            )}
+          </div>
+
+          {isEditing && (
+            <Modal title={`แก้ไขใบเสร็จ ${receipts[editForm.id]?.no}`} onClose={cancelEdit} maxWidth={640}>
               <div className="paper edit-mode">
                 <div className="field">
                   <label>ชื่อลูกค้า</label>
@@ -602,85 +788,7 @@ export default function Receipts() {
                   <span className="v">{money(editGrandTotal)}</span>
                 </div>
               </div>
-            ) : (
-              <div className="paper">
-                <div className="paper-top">
-                  <div className="paper-shop">{settings.shopName}</div>
-                  <div className="paper-addr">
-                    {settings.address}
-                    <br />
-                    โทร. {settings.phone} &nbsp;|&nbsp; เลขผู้เสียภาษี {settings.taxId}
-                  </div>
-                </div>
-                <hr className="paper-divider" />
-                <div className="paper-meta">
-                  <span>เลขที่ใบเสร็จ</span>
-                  <b>{selected.no}</b>
-                </div>
-                <div className="paper-meta">
-                  <span>วันที่</span>
-                  <b>{formatThaiDate(selected.date)} · {selected.time}</b>
-                </div>
-                <div className="paper-meta">
-                  <span>ลูกค้า</span>
-                  <b>{selected.cust}</b>
-                </div>
-                <div className="paper-meta">
-                  <span>ผู้ออกใบเสร็จ</span>
-                  <b>เจ้าของร้าน</b>
-                </div>
-                <hr className="paper-divider" />
 
-                <div className="paper-items">
-                  {selected.items.map((it, i) => (
-                    <div className="paper-item" key={i}>
-                      <div className="pn">
-                        {it.n}
-                        <span className="pw">{it.w}</span>
-                      </div>
-                      <div className="pt">{it.t}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="paper-meta">
-                  <span>น้ำหนักรวม</span>
-                  <b>{selected.weight}</b>
-                </div>
-                <div className="paper-meta">
-                  <span>หักน้ำหนัก/เหตุผล{selected.deductionLabel ? ` (${selected.deductionLabel})` : ''}</span>
-                  <b>−{(selected.deductionWeight || 0).toFixed(2)} กก.</b>
-                </div>
-
-                <div className="paper-total-row">
-                  <span className="l">ยอดรวมสุทธิ</span>
-                  <span className="v">{selected.total}</span>
-                </div>
-                <div className="paper-meta" style={{ marginTop: 8 }}>
-                  <span>วิธีจ่ายเงิน</span>
-                  <b>{selected.method}</b>
-                </div>
-                {selected.note && (
-                  <div className="paper-meta" style={{ marginTop: 8 }}>
-                    <span>หมายเหตุ</span>
-                    <b>{selected.note}</b>
-                  </div>
-                )}
-
-                <div className="paper-barcode">
-                  {Array.from({ length: 18 }).map((_, i) => (
-                    <span key={i} style={{ height: 34, width: (i % 3) + 1 }}></span>
-                  ))}
-                </div>
-                <div className="paper-foot">
-                  {selected.no}
-                  <br />
-                  {settings.receiptFooter}
-                </div>
-              </div>
-            )}
-
-            {isEditing ? (
               <div className="receipt-actions">
                 <button type="button" className="btn btn-primary btn-block" onClick={saveEdit}>
                   <IconCheck />
@@ -691,31 +799,8 @@ export default function Receipts() {
                   ยกเลิกการแก้ไข
                 </button>
               </div>
-            ) : (
-              <div className="receipt-actions">
-                <button type="button" className="btn btn-primary btn-block" onClick={handlePrint}>
-                  <IconPrint />
-                  พิมพ์ใบเสร็จ
-                </button>
-                <div className="action-row">
-                  <button type="button" className="btn btn-ghost" onClick={handleDownloadPdf}>
-                    <IconDownload />
-                    ดาวน์โหลด PDF
-                  </button>
-                  <button type="button" className="btn btn-ghost" onClick={() => startEdit()} disabled={selectedStatus === 'void'}>
-                    <IconEdit />
-                    แก้ไขใบเสร็จ
-                  </button>
-                </div>
-                <button type="button" className="btn btn-danger-ghost btn-block" onClick={() => handleVoid()} disabled={selectedStatus === 'void'}>
-                  <IconTrash />
-                  ยกเลิกใบเสร็จ
-                </button>
-              </div>
-            )}
-              </>
-            )}
-          </div>
+            </Modal>
+          )}
 
           <div className="card mini-stat-card">
             <div className="mini-stat-title">
