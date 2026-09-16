@@ -31,6 +31,7 @@ import {
   IconCheck,
 } from '../icons.jsx';
 import Modal from '../components/Modal.jsx';
+import IdPhotoCapture from '../components/IdPhotoCapture.jsx';
 import './ScrapPurchase.css';
 
 const PAY_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', promptpay: 'พร้อมเพย์' };
@@ -117,17 +118,32 @@ export default function ScrapPurchase() {
   const [showNewCustomer, setShowNewCustomer] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
+  // Same บัตรประชาชน fields as the "เพิ่มลูกค้าใหม่" form on the ลูกค้า page (Customers.jsx) —
+  // a walk-in customer registered here for the first time should be captured with the same
+  // ID info, not just name/phone, so the record doesn't need a second trip through the
+  // ลูกค้า page later to fill in what could have been collected on the spot.
+  const [newCustIdNumber, setNewCustIdNumber] = useState('');
+  const [newCustIdExpiry, setNewCustIdExpiry] = useState('');
+  const [newCustIdPhoto, setNewCustIdPhoto] = useState('');
 
   const [rows, setRows] = useState([]);
 
   const [note, setNote] = useState('');
   const [scaleReading, setScaleReading] = useState(0);
   const [payMethod, setPayMethod] = useState('cash');
+  // Proof the shop actually transferred the money — only meaningful for โอนเงิน, so it's
+  // only ever attached to (and included on) a receipt paid that way.
+  const [transferSlipPhoto, setTransferSlipPhoto] = useState('');
 
   const [showDeduction, setShowDeduction] = useState(false);
   const [deductionWeight, setDeductionWeight] = useState('');
   const [deductionReasonId, setDeductionReasonId] = useState('');
   const [customReason, setCustomReason] = useState('');
+  // Optional, off by default (per-transaction — not every seller is VAT-registered) — when
+  // on, the ยอดสุทธิที่ต้องจ่าย the cashier already agreed with the seller is treated as
+  // VAT-inclusive and broken back down into its ราคาก่อน VAT + VAT 7% parts for the receipt,
+  // rather than adding 7% on top of what was actually paid.
+  const [includeVat, setIncludeVat] = useState(false);
 
   const [banner, setBanner] = useState(null);
   const [printSnapshot, setPrintSnapshot] = useState(null);
@@ -168,6 +184,8 @@ export default function ScrapPurchase() {
     if (draft.deductionReasonId) setDeductionReasonId(draft.deductionReasonId);
     if (draft.customReason) setCustomReason(draft.customReason);
     if (draft.payMethod) setPayMethod(draft.payMethod);
+    if (draft.transferSlipPhoto) setTransferSlipPhoto(draft.transferSlipPhoto);
+    if (draft.includeVat) setIncludeVat(draft.includeVat);
     setShowDraftModal(false);
     setBanner({ type: 'success', text: `นำฉบับร่างที่บันทึกไว้เมื่อ ${draft.savedAt} เข้าฟอร์มแล้ว` });
   }
@@ -238,6 +256,11 @@ export default function ScrapPurchase() {
   const deduction = overallDeductionMoney + rowDeductionsMoneyTotal;
   const grandTotal = Math.max(subtotal - deduction, 0);
   const deductionLabel = deductionReasonId === 'other' ? customReason.trim() : reasons[deductionReasonId]?.name || '';
+  // VAT is extracted back out of grandTotal (treated as VAT-inclusive), not added on top —
+  // the seller is still paid exactly grandTotal either way, this only splits it into the
+  // ราคาก่อน VAT / VAT 7% breakdown a tax-compliant receipt needs to show.
+  const vatAmount = includeVat ? grandTotal - grandTotal / 1.07 : 0;
+  const vatExclusiveTotal = grandTotal - vatAmount;
 
   function updateRow(id, field, value) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)));
@@ -306,10 +329,19 @@ export default function ScrapPurchase() {
     e.preventDefault();
     if (!newCustName.trim() || !newCustPhone.trim()) return;
     try {
-      const created = await addCustomer({ name: newCustName.trim(), phone: newCustPhone.trim() });
+      const created = await addCustomer({
+        name: newCustName.trim(),
+        phone: newCustPhone.trim(),
+        idNumber: newCustIdNumber.trim(),
+        idExpiry: newCustIdExpiry,
+        idPhoto: newCustIdPhoto,
+      });
       setSelectedCustomer(created);
       setNewCustName('');
       setNewCustPhone('');
+      setNewCustIdNumber('');
+      setNewCustIdExpiry('');
+      setNewCustIdPhoto('');
       setShowNewCustomer(false);
     } catch (err) {
       setBanner({ type: 'error', text: err.message });
@@ -346,6 +378,8 @@ export default function ScrapPurchase() {
     setCustomReason('');
     setShowDeduction(false);
     setPayMethod('cash');
+    setTransferSlipPhoto('');
+    setIncludeVat(false);
     setDraftNo(makeDraftNo());
     setDraft(null);
   }
@@ -370,6 +404,8 @@ export default function ScrapPurchase() {
       deductionReasonId,
       customReason,
       payMethod,
+      transferSlipPhoto,
+      includeVat,
     });
     setBanner({ type: 'success', text: 'บันทึกฉบับร่างเรียบร้อยแล้ว — ครั้งถัดไปที่เปิดหน้านี้จะมีให้ตรวจสอบก่อนนำเข้าฟอร์ม' });
   }
@@ -412,6 +448,9 @@ export default function ScrapPurchase() {
       grandTotal,
       payMethod,
       note: note.trim(),
+      slipPhoto: payMethod === 'transfer' ? transferSlipPhoto : '',
+      vatIncluded: includeVat,
+      vatAmount,
     };
     try {
       await addReceipt({
@@ -436,6 +475,9 @@ export default function ScrapPurchase() {
         deductionLabel,
         note: note.trim(),
         method: PAY_LABELS[payMethod],
+        slipPhoto: payMethod === 'transfer' ? transferSlipPhoto : '',
+        vatIncluded: includeVat,
+        vatAmount,
         items: rows.map((r) => ({
           n: r.name,
           w:
@@ -661,9 +703,20 @@ export default function ScrapPurchase() {
             </div>
 
             {showNewCustomer && (
-              <form className="new-cust-form" onSubmit={handleCreateCustomer}>
+              <form className="new-cust-form" onSubmit={handleCreateCustomer} style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                 <input type="text" placeholder="ชื่อลูกค้า" value={newCustName} onChange={(e) => setNewCustName(e.target.value)} required />
                 <input type="text" placeholder="เบอร์โทรศัพท์" value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} required />
+                <IdPhotoCapture value={newCustIdPhoto} onChange={setNewCustIdPhoto} onError={(msg) => setBanner({ type: 'error', text: msg })} />
+                <input
+                  type="text"
+                  placeholder="เลขบัตรประชาชน (ดูจากรูปที่ถ่าย)"
+                  value={newCustIdNumber}
+                  onChange={(e) => setNewCustIdNumber(e.target.value)}
+                />
+                <div className="field">
+                  <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>วันหมดอายุบัตรประชาชน</label>
+                  <input type="date" className="input-plain" value={newCustIdExpiry} onChange={(e) => setNewCustIdExpiry(e.target.value)} />
+                </div>
                 <button type="submit" className="btn btn-primary">
                   บันทึก
                 </button>
@@ -932,6 +985,25 @@ export default function ScrapPurchase() {
               </div>
             )}
 
+            <div className="sum-row">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                <input type="checkbox" checked={includeVat} onChange={(e) => setIncludeVat(e.target.checked)} />
+                <span className="label">ระบุภาษีมูลค่าเพิ่ม (VAT 7%)</span>
+              </label>
+            </div>
+            {includeVat && (
+              <>
+                <div className="sum-row">
+                  <span className="label">ราคาก่อน VAT</span>
+                  <span className="val">{money(vatExclusiveTotal)}</span>
+                </div>
+                <div className="sum-row">
+                  <span className="label">VAT 7%</span>
+                  <span className="val">{money(vatAmount)}</span>
+                </div>
+              </>
+            )}
+
             <div className="grand-total">
               <span className="label">ยอดสุทธิที่ต้องจ่าย</span>
               <span className="val">{money(grandTotal)}</span>
@@ -954,6 +1026,20 @@ export default function ScrapPurchase() {
                 </div>
               </div>
             </div>
+
+            {payMethod === 'transfer' && (
+              <div style={{ marginTop: 14 }}>
+                <label className="pay-label">สลิปโอนเงิน (ไม่บังคับ)</label>
+                <IdPhotoCapture
+                  value={transferSlipPhoto}
+                  onChange={setTransferSlipPhoto}
+                  onError={(msg) => setBanner({ type: 'error', text: msg })}
+                  label="แนบรูปสลิปโอนเงิน"
+                  retakeLabel="แนบรูปใหม่"
+                  alt="สลิปโอนเงิน"
+                />
+              </div>
+            )}
 
             <div className="submit-stack">
               <button type="button" className="btn btn-primary btn-block" onClick={handleSubmit}>
@@ -1057,6 +1143,18 @@ export default function ScrapPurchase() {
               <span>หักน้ำหนัก/เหตุผล{printSnapshot.deductionLabel ? ` (${printSnapshot.deductionLabel})` : ''}</span>
               <b>−{printSnapshot.totalDeductionWeight.toFixed(2)} กก.</b>
             </div>
+            {printSnapshot.vatIncluded && (
+              <>
+                <div className="paper-meta">
+                  <span>ราคาก่อน VAT</span>
+                  <b>{money(printSnapshot.grandTotal - printSnapshot.vatAmount)}</b>
+                </div>
+                <div className="paper-meta">
+                  <span>VAT 7% (รวมในราคาแล้ว)</span>
+                  <b>{money(printSnapshot.vatAmount)}</b>
+                </div>
+              </>
+            )}
 
             <div className="paper-total-row">
               <span className="l">ยอดรวมสุทธิ</span>

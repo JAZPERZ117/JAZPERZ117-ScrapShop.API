@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { IconCalendarBars, IconDownload, IconPrint, IconCategory, IconClockHistory, IconUsers } from '../icons.jsx';
 import { exportCsv } from '../lib/csvExport.js';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
@@ -50,7 +50,16 @@ function nowStr() {
   return new Date().toLocaleString('th-TH', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-const CURRENT_YEAR_BE = new Date().getFullYear() + 543;
+function yearLabelBE(yearAD) {
+  return yearAD + 543;
+}
+
+// Local, not UTC — matches ReceiptsContext.jsx's own todayISO(), which is what every
+// receipt's `date` field is actually stamped with.
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 export default function AnnualReport() {
   const { receipts, order: receiptOrder } = useReceipts();
@@ -60,9 +69,16 @@ export default function AnnualReport() {
   const { settings } = useSettings();
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
 
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonthIndex = now.getMonth();
+  const realNow = new Date();
+  // Which year this report shows — defaults to the real current year, but the year field
+  // below lets the user pick any past year to look up instead of only ever showing "now".
+  const [currentYear, setCurrentYear] = useState(realNow.getFullYear());
+  const isViewingCurrentYear = currentYear === realNow.getFullYear();
+  // Months past "now" haven't happened yet and must render as empty/future — but that only
+  // means anything for the real current year; a past year picked from the selector is
+  // entirely in the past, so every one of its months has already fully happened.
+  const currentMonthIndex = isViewingCurrentYear ? realNow.getMonth() : 11;
+  const CURRENT_YEAR_BE = yearLabelBE(currentYear);
 
   // Every receipt now carries a real date, so the year-to-date figures and monthly chart
   // are computed directly from actual data instead of a "historical demo months + real
@@ -185,10 +201,21 @@ export default function AnnualReport() {
           <div className="page-sub">ภาพรวมยอดรับซื้อและกำไรตลอดปี แยกตามไตรมาสและหมวดหมู่</div>
         </div>
         <div className="head-actions">
-          <div className="date-select">
+          <label className="date-select" style={{ cursor: 'pointer', position: 'relative' }}>
             <IconClockHistory />
             ปี {CURRENT_YEAR_BE}
-          </div>
+            <input
+              type="date"
+              value={`${currentYear}-01-01`}
+              max={todayISO()}
+              onChange={(e) => {
+                const y = Number(e.target.value.slice(0, 4));
+                if (y) setCurrentYear(y);
+              }}
+              title="เลือกวันที่ในปีที่ต้องการดูรายงาน"
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, cursor: 'pointer', border: 'none' }}
+            />
+          </label>
           <button type="button" className="btn btn-ghost" onClick={handleExport}>
             <IconDownload />
             ส่งออก Excel
