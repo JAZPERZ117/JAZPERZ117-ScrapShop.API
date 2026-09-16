@@ -21,8 +21,17 @@ function HealthCheck {
 }
 
 function Pm2Pids {
+  # NOT `pm2 jlist | ConvertFrom-Json` — pm2 dumps each process's full environment into that
+  # JSON (pm2_env.env), and Windows env var names are case-insensitive while PowerShell's JSON
+  # parser treats object keys case-insensitively too, so a real-world env with both
+  # COMMONPROGRAMFILES and CommonProgramFiles throws "duplicated keys" and ConvertFrom-Json
+  # fails outright — silently, since the caller only sees Pm2Pids' try/catch swallow it and
+  # return an empty list. That emptiness then makes the pid-match below fail unconditionally,
+  # which is exactly backwards: it made this watchdog treat the backend as unmanaged and kill +
+  # restart the perfectly healthy process on every single run. `pm2 pid <name>` sidesteps all of
+  # this — it's already just the bare pid(s), one per line, no JSON involved.
   try {
-    return (& pm2 jlist 2>$null | ConvertFrom-Json) | Where-Object { $_.name -eq 'scrapshop-api' } | ForEach-Object { $_.pid }
+    return (& pm2 pid scrapshop-api 2>$null) -split "`n" | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ }
   } catch {
     return @()
   }
