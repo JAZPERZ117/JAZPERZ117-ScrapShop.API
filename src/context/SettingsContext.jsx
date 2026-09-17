@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { usePersistentState } from '../lib/persist.js';
+import { usePolling } from '../lib/polling.js';
 import { getToken } from '../lib/auth.js';
 
 export const INITIAL_SETTINGS = {
@@ -49,6 +50,7 @@ export function SettingsProvider({ children }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  usePolling(refresh, 5000);
 
   // Applied at the provider level (not inside the Settings page) so the theme is in
   // effect on every page, not just while the settings page happens to be open.

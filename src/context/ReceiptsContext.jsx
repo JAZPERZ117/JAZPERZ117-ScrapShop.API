@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { getToken } from '../lib/auth.js';
+import { usePolling } from '../lib/polling.js';
 
 function authHeaders() {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` };
@@ -37,6 +38,7 @@ export function ReceiptsProvider({ children }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  usePolling(refresh, 5000);
 
   async function addReceipt(data) {
     const res = await fetch('/api/receipts', {

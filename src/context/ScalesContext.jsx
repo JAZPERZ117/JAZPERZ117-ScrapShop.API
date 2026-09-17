@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { getToken } from '../lib/auth.js';
+import { usePolling } from '../lib/polling.js';
 
 export const BLANK_DEVICE = { name: '', model: 'ไม่ระบุรุ่น', bg: 'var(--bg)', fg: 'var(--ink-500)', port: '—', conn: 'สาย USB / RS-232', max: '—', res: '—', cal: 'ยังไม่เคยสอบเทียบ', due: '—', status: 'off', active: false };
 
@@ -50,6 +51,8 @@ export function ScalesProvider({ children }) {
     refresh();
     refreshActivity();
   }, [refresh, refreshActivity]);
+  usePolling(refresh, 5000);
+  usePolling(refreshActivity, 5000);
 
   async function logActivity(entry) {
     try {

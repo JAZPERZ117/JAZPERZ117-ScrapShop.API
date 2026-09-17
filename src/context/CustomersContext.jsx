@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getToken } from '../lib/auth.js';
+import { usePolling } from '../lib/polling.js';
 
 // ID cards are flagged as "near expiry" inside this many days of idExpiry (including
 // already-past dates) — renewing a customer's idExpiry date is what clears the warning.
@@ -54,6 +55,7 @@ export function CustomersProvider({ children }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  usePolling(refresh, 5000);
 
   // idWarn/idDaysLeft are derived live from idExpiry vs today, not stored — so renewing
   // a customer's ID (editing idExpiry to a future date) immediately clears the warning

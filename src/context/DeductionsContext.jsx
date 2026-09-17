@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getToken } from '../lib/auth.js';
+import { usePolling } from '../lib/polling.js';
 import { IconDroplet, IconCircleX, IconBox, IconMagnet, IconScale, IconCrop, IconEdit } from '../icons.jsx';
 
 // Icon components can't survive JSON persistence, so they're re-attached from this
@@ -48,6 +49,7 @@ export function DeductionsProvider({ children }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  usePolling(refresh, 5000);
 
   const reasons = useMemo(() => {
     const withIcons = {};
