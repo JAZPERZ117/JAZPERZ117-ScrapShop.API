@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { getToken } from '../lib/auth.js';
+import { usePolling } from '../lib/polling.js';
 
 const MAX_DAYS_PER_WEEK = 6;
 
@@ -82,6 +83,7 @@ export function PayrollProvider({ children }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  usePolling(refresh, 5000);
 
   async function createStaff(data) {
     const res = await fetch('/api/staff', {
