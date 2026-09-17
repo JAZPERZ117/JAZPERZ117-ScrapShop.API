@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getToken } from '../lib/auth.js';
+import { usePolling } from '../lib/polling.js';
 import { IconMagnet, IconCardboard, IconBottle, IconGlass, IconDevice, IconCategory } from '../icons.jsx';
 
 // Icon components can't survive JSON persistence, so raw data stores an iconKey
@@ -66,6 +67,7 @@ export function CategoriesProvider({ children }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+  usePolling(refresh, 5000);
 
   const categories = useMemo(() => {
     const out = {};

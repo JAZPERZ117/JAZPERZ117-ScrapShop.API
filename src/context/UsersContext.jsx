@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useCallback } from 'react';
 import { usePersistentState } from '../lib/persist.js';
+import { usePolling } from '../lib/polling.js';
 import { getToken } from '../lib/auth.js';
 
 export const ROLES = ['เจ้าของร้าน', 'ผู้จัดการ', 'แคชเชียร์', 'พนักงานชั่งของ'];
@@ -129,6 +130,7 @@ export function UsersProvider({ children }) {
     refreshUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  usePolling(refreshUsers, 5000);
 
   return (
     <UsersContext.Provider value={{ users, setUsers, order, setOrder, refreshUsers }}>

@@ -602,7 +602,7 @@ app.post('/api/receipts', requireAuth, (req, res) => {
   }
   db.prepare(
     `INSERT INTO receipts (no, date, time, cust, cust_id, issued_by, init, bg, fg, status, weight, deduction_weight, deduction_label, note, method, items, total, deduction_usage, slip_photo, vat_included, vat_amount)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     b.no,
     b.date || todayISO(),
