@@ -203,8 +203,11 @@ export default function Receipts() {
     // the customer's lifetime weight/spend/visit bump (only possible for receipts that
     // recorded which customer id made the purchase — older receipts and walk-in sales
     // have no custId to reverse against, so only the stock side-effect can be undone there).
+    // removeStockByName reports whether the write actually reached the server, so a dropped
+    // connection here can be surfaced instead of silently claiming the stock was restored.
+    let unrestoredWeight = 0;
     for (const it of target.items || []) {
-      removeStockByName(it.n, parseItemNetWeight(it));
+      if (!(await removeStockByName(it.n, parseItemNetWeight(it)))) unrestoredWeight += parseItemNetWeight(it);
     }
     if (target.custId) {
       reversePurchase(target.custId, { weightKg: parseWeightKg(target.weight), amount: parseMoney(target.total), receiptNo: target.no });
@@ -213,7 +216,11 @@ export default function Receipts() {
       decrementUsage(du.id, du.amount);
     }
     logActivity(`ยกเลิก ${target.no}`);
-    setBanner({ type: 'error', text: `ยกเลิกใบเสร็จ ${target.no} แล้ว — คืนสต็อกสินค้าและยอดสะสมลูกค้าที่เกี่ยวข้องแล้ว` });
+    setBanner(
+      unrestoredWeight > 0
+        ? { type: 'error', text: `ยกเลิกใบเสร็จ ${target.no} แล้ว — แต่คืนสต็อก ${unrestoredWeight.toFixed(2)} กก. ไม่ได้ กรุณาตรวจสอบสต็อกด้วยตนเอง` }
+        : { type: 'error', text: `ยกเลิกใบเสร็จ ${target.no} แล้ว — คืนสต็อกสินค้าและยอดสะสมลูกค้าที่เกี่ยวข้องแล้ว` }
+    );
     scrollToPreview();
   }
 
@@ -359,18 +366,25 @@ export default function Receipts() {
     // diverging from what the (now-edited) receipt says. Deduction usage isn't touched here:
     // the edit form doesn't track which deduction reason id was originally applied, so there's
     // no reliable way to recompute it — it's left exactly as the original receipt recorded it.
+    // removeStockByName/addStock report whether each write actually reached the server, so a
+    // dropped connection mid-edit can be surfaced instead of silently claiming stock is in sync.
+    let stockAdjustFailed = false;
     for (const it of original.items || []) {
-      removeStockByName(it.n, parseItemNetWeight(it));
+      if (!(await removeStockByName(it.n, parseItemNetWeight(it)))) stockAdjustFailed = true;
     }
     for (const it of validItems) {
-      addStock(it.name.trim(), parseFloat(it.weight) || 0, parseFloat(it.price) || 0);
+      if (!(await addStock(it.name.trim(), parseFloat(it.weight) || 0, parseFloat(it.price) || 0))) stockAdjustFailed = true;
     }
     if (original.custId) {
       reversePurchase(original.custId, { weightKg: parseWeightKg(original.weight), amount: parseMoney(original.total), receiptNo: original.no });
       recordPurchase(original.custId, { weightKg: editTotalWeight, amount: editGrandTotal, receiptNo: original.no, timeStr: nowTimeStr() });
     }
     logActivity(`แก้ไขใบเสร็จ ${original.no}`);
-    setBanner({ type: 'success', text: `บันทึกการแก้ไขใบเสร็จ ${original.no} แล้ว — ปรับสต็อกสินค้าและยอดสะสมลูกค้าให้ตรงกับรายการที่แก้ไขแล้ว` });
+    setBanner(
+      stockAdjustFailed
+        ? { type: 'error', text: `บันทึกการแก้ไขใบเสร็จ ${original.no} แล้ว — แต่ปรับสต็อกสินค้าไม่สำเร็จบางส่วน กรุณาตรวจสอบสต็อกด้วยตนเอง` }
+        : { type: 'success', text: `บันทึกการแก้ไขใบเสร็จ ${original.no} แล้ว — ปรับสต็อกสินค้าและยอดสะสมลูกค้าให้ตรงกับรายการที่แก้ไขแล้ว` }
+    );
     setIsEditing(false);
     setEditForm(null);
   }

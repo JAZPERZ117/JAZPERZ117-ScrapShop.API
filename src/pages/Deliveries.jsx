@@ -324,7 +324,7 @@ export default function Deliveries() {
       if (it.productId) {
         if (!(await addStockById(it.productId, it.weight))) unrestoredWeight += it.weight;
       } else {
-        await addStock(it.name, it.weight);
+        if (!(await addStock(it.name, it.weight))) unrestoredWeight += it.weight;
       }
     }
     await Promise.all(validRows.map((r) => removeStock(r.productId, editRowWeight(r))));
@@ -349,7 +349,7 @@ export default function Deliveries() {
       if (it.productId) {
         if (!(await addStockById(it.productId, it.weight))) unrestoredWeight += it.weight;
       } else {
-        await addStock(it.name, it.weight);
+        if (!(await addStock(it.name, it.weight))) unrestoredWeight += it.weight;
       }
     }
     try {

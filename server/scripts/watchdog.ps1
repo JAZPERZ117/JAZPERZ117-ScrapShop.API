@@ -13,7 +13,16 @@ function Log($msg) {
 
 function HealthCheck {
   try {
-    $code = & curl.exe -sk -o NUL -w '%{http_code}' https://localhost:4000/api/health 2>$null
+    # Mirrors index.js's own check (and vite.config.js's dev proxy) exactly: the backend only
+    # serves HTTPS once both cert files exist on disk, otherwise it falls back to plain HTTP on
+    # the same port. Hardcoding https here would make the watchdog see a perfectly healthy
+    # HTTP-only backend as "down" whenever the certs are missing (fresh clone, cert rotation
+    # gap) and needlessly restart it — the exact class of false-positive this watchdog already
+    # had to be fixed for once before, just triggered by a protocol assumption this time.
+    $certDir = Join-Path $PSScriptRoot '..\certs'
+    $hasCert = (Test-Path (Join-Path $certDir 'cert.pem')) -and (Test-Path (Join-Path $certDir 'key.pem'))
+    $scheme = if ($hasCert) { 'https' } else { 'http' }
+    $code = & curl.exe -sk -o NUL -w '%{http_code}' "${scheme}://localhost:4000/api/health" 2>$null
     return $code -eq '200'
   } catch {
     return $false
