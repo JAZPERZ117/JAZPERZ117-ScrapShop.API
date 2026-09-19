@@ -121,18 +121,19 @@ export function ProductsProvider({ children }) {
   // purchase — the server creates it (priced at what was actually paid) rather than silently
   // dropping the stock update.
   async function addStock(productName, weightKg, unitPrice) {
-    if (!weightKg || weightKg <= 0) return;
+    if (!weightKg || weightKg <= 0) return true;
     const name = (productName || '').trim();
-    if (!name) return;
+    if (!name) return false;
     const res = await fetch('/api/products/add-stock', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ name, weightKg, unitPrice }),
     });
-    if (!res.ok) return;
+    if (!res.ok) return false;
     const data = await res.json();
     setProductsRaw((prev) => ({ ...prev, [data.product.id]: data.product }));
     setOrder((prev) => (prev.includes(data.product.id) ? prev : [data.product.id, ...prev]));
+    return true;
   }
 
   // Shipping accumulated stock out to a buyer (see Deliveries.jsx) removes it from on-hand
@@ -172,17 +173,18 @@ export function ProductsProvider({ children }) {
   // added, but receipts only ever recorded item names — not ids — matching how addStock above
   // looks products up, so this mirrors that name-based lookup instead of removeStock's id-based one.
   async function removeStockByName(productName, weightKg) {
-    if (!weightKg || weightKg <= 0) return;
+    if (!weightKg || weightKg <= 0) return true;
     const name = (productName || '').trim();
-    if (!name) return;
+    if (!name) return false;
     const res = await fetch('/api/products/remove-stock-by-name', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ name, weightKg }),
     });
-    if (!res.ok) return;
+    if (!res.ok) return false;
     const data = await res.json();
     if (data.product) setProductsRaw((prev) => ({ ...prev, [data.product.id]: data.product }));
+    return true;
   }
 
   // Renaming/deleting a category (see Categories.jsx) cascades onto every product referencing
