@@ -12,14 +12,20 @@ $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $watchdogScript = Join-Path $scriptDir 'watchdog.ps1'
 
+
+# -WindowStyle Hidden alone still briefly flashes a console before the style applies, and every
+# other minute this task ran (every 5 min, forever) it kept doing that on top of the desk — the
+# -Hidden setting below is what actually suppresses the window instead of just minimizing it.
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$watchdogScript`""
+  -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$watchdogScript`""
 # Task Scheduler's XML duration format can't represent [TimeSpan]::MaxValue (it overflows the
 # schema's range) — 10 years is effectively "forever" for a task meant to run indefinitely.
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
   -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
+$settings = New-ScheduledTaskSettingsSet -Hidden
 
 Register-ScheduledTask -TaskName 'ScrapShop Backend Watchdog' -Action $action -Trigger $trigger `
+  -Settings $settings `
   -Description 'Checks every 5 minutes that the ScrapShop backend is responding, and recovers it via pm2 if not' -Force
 
 Write-Host 'Registered. Verify with:'
