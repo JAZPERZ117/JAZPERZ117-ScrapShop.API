@@ -11,15 +11,18 @@
 $ErrorActionPreference = 'Stop'
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$backupScript = Join-Path $scriptDir 'backup-db.js'
-$serverDir = Split-Path -Parent $scriptDir
-$nodePath = (Get-Command node).Source
+$wrapperScript = Join-Path $scriptDir 'backup-and-push.ps1'
 
-$action = New-ScheduledTaskAction -Execute $nodePath -Argument "`"$backupScript`"" -WorkingDirectory $serverDir
+# backup-and-push.ps1 runs backup-db.js itself (as a child process, cwd set there) and then
+# pushes the snapshot to BACKUP_DIR's git remote, so the task calls the wrapper instead of node
+# directly.
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+  -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$wrapperScript`""
 $trigger = New-ScheduledTaskTrigger -Daily -At '03:00'
+$settings = New-ScheduledTaskSettingsSet -Hidden
 
-Register-ScheduledTask -TaskName 'ScrapShop DB Backup' -Action $action -Trigger $trigger `
-  -Description 'Daily backup of the ScrapShop SQLite database (server/scripts/backup-db.js)' -Force
+Register-ScheduledTask -TaskName 'ScrapShop DB Backup' -Action $action -Trigger $trigger -Settings $settings `
+  -Description 'Daily backup of the ScrapShop SQLite database, pushed to a private GitHub repo (server/scripts/backup-and-push.ps1)' -Force
 
 Write-Host 'Registered. Verify with:'
 Write-Host '  Get-ScheduledTask -TaskName "ScrapShop DB Backup"'
