@@ -14,9 +14,11 @@ const { DatabaseSync } = require('node:sqlite');
 
 const DB_PATH = path.join(__dirname, '..', 'shop.db');
 // Defaults to a folder next to shop.db, but is meant to be pointed (via server/.env) at a
-// synced folder — OneDrive, Google Drive, etc. — so a backup actually leaves this machine
-// instead of sitting on the same disk as the database it's a backup of. Never a GitHub repo:
-// this app stores real customer PII (ID card numbers/photos), and this repo is public.
+// synced folder — OneDrive, Google Drive, etc. — or a git working copy that
+// backup-and-push.ps1 pushes to a dedicated PRIVATE repo, so a backup actually leaves this
+// machine instead of sitting on the same disk as the database it's a backup of. Never this
+// app's own repo, and never a public remote of any kind: this app stores real customer PII
+// (ID card numbers/photos), and this app's repo is public.
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(__dirname, '..', 'backups');
 const RETENTION_DAYS = 30;
 
