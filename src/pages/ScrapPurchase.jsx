@@ -534,10 +534,17 @@ export default function ScrapPurchase() {
     if (selectedCustomer?.id) {
       recordPurchase(selectedCustomer.id, { weightKg: totalWeight, amount: grandTotal, receiptNo, timeStr });
     }
+    // addStock reports whether the write actually reached the server, so a dropped connection
+    // here can be surfaced instead of silently claiming stock is up to date.
+    let stockUpdateFailed = false;
     for (const r of rows) {
-      addStock(r.name, rowNetWeight(r), rowPrice(r));
+      if (!(await addStock(r.name, rowNetWeight(r), rowPrice(r)))) stockUpdateFailed = true;
     }
-    setBanner({ type: 'success', text: `บันทึกและพิมพ์ใบเสร็จ ${receiptNo} เรียบร้อยแล้ว ยอดสุทธิ ${money(grandTotal)}` });
+    setBanner(
+      stockUpdateFailed
+        ? { type: 'error', text: `บันทึกและพิมพ์ใบเสร็จ ${receiptNo} เรียบร้อยแล้ว ยอดสุทธิ ${money(grandTotal)} — แต่ปรับสต็อกสินค้าไม่สำเร็จบางส่วน กรุณาตรวจสอบสต็อกด้วยตนเอง` }
+        : { type: 'success', text: `บันทึกและพิมพ์ใบเสร็จ ${receiptNo} เรียบร้อยแล้ว ยอดสุทธิ ${money(grandTotal)}` }
+    );
     resetForm();
     setTimeout(() => window.print(), 50);
   }

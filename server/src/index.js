@@ -307,8 +307,8 @@ app.put('/api/customers/:id', requireAuth, (req, res) => {
   ).run(
     nextName,
     body.name?.trim() ? nextName.replace('คุณ', '').trim().slice(0, 2) || row.init : row.init,
-    body.phone !== undefined ? body.phone.trim() : row.phone,
-    body.idNumber !== undefined ? body.idNumber.trim() : row.id_number,
+    body.phone !== undefined ? (body.phone?.trim() ?? null) : row.phone,
+    body.idNumber !== undefined ? (body.idNumber?.trim() ?? null) : row.id_number,
     body.idExpiry !== undefined ? body.idExpiry : row.id_expiry,
     body.idPhoto !== undefined ? body.idPhoto : row.id_photo,
     body.tag !== undefined ? body.tag : row.tag,
@@ -829,7 +829,7 @@ app.put('/api/staff/:id', requireAuth, (req, res) => {
   db.prepare(
     `UPDATE staff SET name = ?, role = ?, base = ?, days = ?, max_days = ?, attendance = ?, advance = ?, other_amount = ?, other_reason_id = ?, other_custom_reason = ?, paid = ? WHERE id = ?`
   ).run(
-    b.name !== undefined ? b.name.trim() || row.name : row.name,
+    b.name !== undefined ? b.name?.trim() || row.name : row.name,
     b.role !== undefined ? b.role : row.role,
     b.base !== undefined ? b.base : row.base,
     b.days !== undefined ? b.days : row.days,
@@ -944,7 +944,7 @@ app.put('/api/deduction-reasons/:id', requireAuth, (req, res) => {
   db.prepare(
     `UPDATE deduction_reasons SET name = ?, desc = ?, type = ?, value = ?, active = ? WHERE id = ?`
   ).run(
-    b.name !== undefined ? b.name.trim() || row.name : row.name,
+    b.name !== undefined ? b.name?.trim() || row.name : row.name,
     b.desc !== undefined ? b.desc : row.desc,
     b.type !== undefined ? b.type : row.type,
     b.value !== undefined ? b.value : row.value,
@@ -1034,7 +1034,7 @@ app.put('/api/categories/:id', requireAuth, (req, res) => {
   db.prepare(
     `UPDATE categories SET name = ?, color = ?, desc = ?, is_active = ? WHERE id = ?`
   ).run(
-    b.name !== undefined ? b.name.trim() || row.name : row.name,
+    b.name !== undefined ? b.name?.trim() || row.name : row.name,
     b.color !== undefined ? b.color : row.color,
     b.desc !== undefined ? b.desc : row.desc,
     b.isActive !== undefined ? (b.isActive ? 1 : 0) : row.is_active,
@@ -1121,7 +1121,7 @@ app.put('/api/scales/:id', requireAuth, (req, res) => {
   db.prepare(
     `UPDATE scales SET name = ?, conn = ?, port = ?, status = ?, cal = ?, due = ? WHERE id = ?`
   ).run(
-    b.name !== undefined ? b.name.trim() || row.name : row.name,
+    b.name !== undefined ? b.name?.trim() || row.name : row.name,
     b.conn !== undefined ? b.conn : row.conn,
     b.port !== undefined ? b.port : row.port,
     b.status !== undefined ? b.status : row.status,
