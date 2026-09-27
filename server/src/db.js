@@ -327,6 +327,12 @@ const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) 
 if (!settingsColumns.includes('require_seller')) {
   db.exec('ALTER TABLE settings ADD COLUMN require_seller INTEGER NOT NULL DEFAULT 0');
 }
+// Words that suggest stolen public/utility property (manhole covers, power cable, road signs...).
+// The purchase screen warns and asks for confirmation when an item name or note contains one.
+// One per line; editable in Settings.
+if (!settingsColumns.includes('watch_keywords')) {
+  db.exec("ALTER TABLE settings ADD COLUMN watch_keywords TEXT NOT NULL DEFAULT 'ฝาท่อ\nตะแกรงท่อ\nสายไฟการไฟฟ้า\nสายไฟแรงสูง\nหม้อแปลง\nมิเตอร์ไฟ\nมิเตอร์น้ำ\nป้ายจราจร\nราวสะพาน\nราวกันตก\nรางรถไฟ\nสายโทรศัพท์\nสายเคเบิล\nประตูรั้ว\nระฆัง'");
+}
 
 // Running costs of the shop itself (electricity, fuel, rent, repairs...) — separate from buying
 // scrap in (receipts) and from wages (pay_history), and deducted alongside both when reports

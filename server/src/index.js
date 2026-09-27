@@ -1292,6 +1292,7 @@ function toApiSettings(row) {
     remember30: !!row.remember30,
     pinLogin: !!row.pin_login,
     requireSeller: !!row.require_seller,
+    watchKeywords: row.watch_keywords || '',
   };
 }
 
@@ -1308,7 +1309,7 @@ app.put('/api/settings', requireAuth, requireOwner, (req, res) => {
   const row = db.prepare("SELECT * FROM settings WHERE id = 'shop'").get();
   const b = req.body || {};
   db.prepare(
-    `UPDATE settings SET shop_name = ?, tax_id = ?, address = ?, phone = ?, hours = ?, receipt_footer = ?, remember30 = ?, pin_login = ?, require_seller = ? WHERE id = 'shop'`
+    `UPDATE settings SET shop_name = ?, tax_id = ?, address = ?, phone = ?, hours = ?, receipt_footer = ?, remember30 = ?, pin_login = ?, require_seller = ?, watch_keywords = ? WHERE id = 'shop'`
   ).run(
     b.shopName !== undefined ? b.shopName : row.shop_name,
     b.taxId !== undefined ? b.taxId : row.tax_id,
@@ -1318,7 +1319,8 @@ app.put('/api/settings', requireAuth, requireOwner, (req, res) => {
     b.receiptFooter !== undefined ? b.receiptFooter : row.receipt_footer,
     b.remember30 !== undefined ? (b.remember30 ? 1 : 0) : row.remember30,
     b.pinLogin !== undefined ? (b.pinLogin ? 1 : 0) : row.pin_login,
-    b.requireSeller !== undefined ? (b.requireSeller ? 1 : 0) : row.require_seller
+    b.requireSeller !== undefined ? (b.requireSeller ? 1 : 0) : row.require_seller,
+    b.watchKeywords !== undefined ? String(b.watchKeywords) : row.watch_keywords
   );
   res.json({ settings: toApiSettings(db.prepare("SELECT * FROM settings WHERE id = 'shop'").get()) });
 });

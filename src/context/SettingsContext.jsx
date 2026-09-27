@@ -13,6 +13,7 @@ export const INITIAL_SETTINGS = {
   remember30: true,
   pinLogin: true,
   requireSeller: false,
+  watchKeywords: '',
 };
 
 function authHeaders() {
