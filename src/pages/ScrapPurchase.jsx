@@ -136,6 +136,7 @@ export default function ScrapPurchase() {
   // Proof the shop actually transferred the money — only meaningful for โอนเงิน, so it's
   // only ever attached to (and included on) a receipt paid that way.
   const [transferSlipPhoto, setTransferSlipPhoto] = useState('');
+  const [goodsPhoto, setGoodsPhoto] = useState('');
 
   const [showDeduction, setShowDeduction] = useState(false);
   const [deductionWeight, setDeductionWeight] = useState('');
@@ -390,6 +391,7 @@ export default function ScrapPurchase() {
     setShowDeduction(false);
     setPayMethod('cash');
     setTransferSlipPhoto('');
+    setGoodsPhoto('');
     setIncludeVat(false);
     setDraftNo(makeDraftNo());
     setDraft(null);
@@ -513,6 +515,7 @@ export default function ScrapPurchase() {
         note: note.trim(),
         method: PAY_LABELS[payMethod],
         slipPhoto: payMethod === 'transfer' ? transferSlipPhoto : '',
+        goodsPhoto,
         vatIncluded: includeVat,
         vatAmount,
         items: rows.map((r) => ({
@@ -1081,6 +1084,18 @@ export default function ScrapPurchase() {
                   พร้อมเพย์
                 </div>
               </div>
+            </div>
+
+            <div style={{ marginTop: 14 }}>
+              <label className="pay-label">รูปสินค้าที่รับซื้อ (ไม่บังคับ — เก็บเป็นหลักฐาน)</label>
+              <IdPhotoCapture
+                value={goodsPhoto}
+                onChange={setGoodsPhoto}
+                onError={(msg) => setBanner({ type: 'error', text: msg })}
+                label="ถ่ายรูปสินค้า"
+                retakeLabel="ถ่ายรูปใหม่"
+                alt="รูปสินค้าที่รับซื้อ"
+              />
             </div>
 
             {payMethod === 'transfer' && (
