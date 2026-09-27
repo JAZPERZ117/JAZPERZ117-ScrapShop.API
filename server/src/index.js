@@ -71,7 +71,7 @@ app.get('/api/health', (req, res) => {
 });
 
 app.post('/api/login', authLimiter, (req, res) => {
-  const { username, password } = req.body || {};
+  const { username, password, remember } = req.body || {};
 
   if (!username || !password) {
     return res.status(400).json({ error: 'กรุณากรอกชื่อผู้ใช้งานและรหัสผ่าน' });
@@ -85,10 +85,13 @@ app.post('/api/login', authLimiter, (req, res) => {
     return res.status(401).json({ error: 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง' });
   }
 
+  // "จดจำการเข้าสู่ระบบ 30 วัน" kept the session in localStorage for 30 days, but the token
+  // itself always expired after 8h — past that, every API call 401'd while the UI still looked
+  // signed in. The token's own lifetime now matches what the checkbox promises.
   const token = jwt.sign(
     { sub: user.id, username: user.username, role: user.role },
     JWT_SECRET,
-    { expiresIn: '8h' }
+    { expiresIn: remember ? '30d' : '8h' }
   );
 
   res.json({
@@ -236,6 +239,12 @@ app.delete('/api/users/:id', requireAuth, requireOwner, (req, res) => {
 });
 
 app.post('/api/pin-login', authLimiter, (req, res) => {
+  // The Settings toggle used to only hide the PIN button on the login page — this endpoint kept
+  // accepting PINs regardless, so turning it "off" didn't actually disable anything.
+  const settingsRow = db.prepare("SELECT pin_login FROM settings WHERE id = 'shop'").get();
+  if (settingsRow && !settingsRow.pin_login) {
+    return res.status(403).json({ error: 'ปิดการเข้าสู่ระบบด้วย PIN อยู่ — ติดต่อเจ้าของร้าน' });
+  }
   const { pin } = req.body || {};
   if (!pin || !/^\d{4}$/.test(pin)) {
     return res.status(400).json({ error: 'กรุณากรอก PIN 4 หลัก' });
