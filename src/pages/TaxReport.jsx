@@ -3,6 +3,9 @@ import { IconTax, IconPrint, IconUser, IconCalendarBars, IconSplit, IconInfo, Ic
 import { exportCsv } from '../lib/csvExport.js';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
+import { useDeliveries } from '../context/DeliveriesContext.jsx';
+import { usePayroll } from '../context/PayrollContext.jsx';
+import { estimateTax, EXPENSE_METHOD_LABELS } from '../lib/finance.js';
 import './TaxReport.css';
 
 const TAX_YEAR_BE = new Date().getFullYear() + 543;
@@ -25,33 +28,12 @@ function parseWeightKg(w) {
   return parseFloat(String(w).replace(/[^\d.]/g, '')) || 0;
 }
 
-// Thai personal income tax brackets (progressive)
-const TAX_BRACKETS = [
-  { upTo: 150000, rate: 0 },
-  { upTo: 300000, rate: 0.05 },
-  { upTo: 500000, rate: 0.1 },
-  { upTo: 750000, rate: 0.15 },
-  { upTo: 1000000, rate: 0.2 },
-  { upTo: 2000000, rate: 0.25 },
-  { upTo: 5000000, rate: 0.3 },
-  { upTo: Infinity, rate: 0.35 },
-];
-
-function calcProgressiveTax(netIncome) {
-  let tax = 0;
-  let lower = 0;
-  for (const bracket of TAX_BRACKETS) {
-    if (netIncome <= lower) break;
-    const taxableInBracket = Math.min(netIncome, bracket.upTo) - lower;
-    tax += taxableInBracket * bracket.rate;
-    lower = bracket.upTo;
-  }
-  return tax;
-}
-
 export default function TaxReport() {
   const [taxForm, setTaxForm] = useState('90');
+  const [expenseMethod, setExpenseMethod] = useState('actual');
   const { receipts, order: receiptOrder } = useReceipts();
+  const { deliveries, order: deliveryOrder } = useDeliveries();
+  const { payHistory } = usePayroll();
   const { settings } = useSettings();
 
   // Every receipt now carries a real date, so each month's row is computed directly from
@@ -66,40 +48,58 @@ export default function TaxReport() {
   const isHalfYear = taxForm === '94';
   const lastMonthIndex = isHalfYear ? Math.min(5, currentMonthIndex) : currentMonthIndex;
 
+  // Taxable income is what the shop earns selling scrap to buyers (Deliveries); what it pays
+  // sellers when buying scrap in (Receipts) is cost, deductible under the "actual" method.
   const monthly = useMemo(() => {
-    const months = Array.from({ length: 12 }, () => ({ amt: 0, weightKg: 0, receiptCount: 0 }));
+    const months = Array.from({ length: 12 }, () => ({ sales: 0, purchases: 0, weightKg: 0, receiptCount: 0 }));
     for (const id of receiptOrder) {
       const r = receipts[id];
       if (r.status === 'void') continue;
       const [y, m] = (r.date || '').split('-').map(Number);
       if (y !== currentYear) continue;
-      months[m - 1].amt += parseMoney(r.total);
+      months[m - 1].purchases += parseMoney(r.total);
       months[m - 1].weightKg += parseWeightKg(r.weight);
       months[m - 1].receiptCount += 1;
+    }
+    for (const id of deliveryOrder) {
+      const d = deliveries[id];
+      const [y, m] = (d.date || '').split('-').map(Number);
+      if (y !== currentYear || !m) continue;
+      months[m - 1].sales += d.totalAmount || 0;
     }
     return months
       .slice(0, lastMonthIndex + 1)
       .map((m, i) => ({ ...m, m: `${MONTH_LABELS_FULL[i]} ${TAX_YEAR_BE}` }));
-  }, [receiptOrder, receipts, currentYear, lastMonthIndex]);
+  }, [receiptOrder, receipts, deliveryOrder, deliveries, currentYear, lastMonthIndex]);
 
-  const totalIncome = useMemo(() => monthly.reduce((s, m) => s + m.amt, 0), [monthly]);
+  const totalIncome = monthly.reduce((s, m) => s + m.sales, 0);
+  const totalPurchases = monthly.reduce((s, m) => s + m.purchases, 0);
   const totalWeightKg = monthly.reduce((s, m) => s + m.weightKg, 0);
   const totalReceiptCount = monthly.reduce((s, m) => s + m.receiptCount, 0);
-  const expenseDeduct = totalIncome * 0.6;
-  const personalDeduct = isHalfYear ? 30000 : 60000;
+  const wagesPaid = payHistory
+    .filter((p) => {
+      const d = new Date(p.paidAt);
+      return d.getFullYear() === currentYear && d.getMonth() <= lastMonthIndex;
+    })
+    .reduce((s, p) => s + (p.net || 0), 0);
+  const { expenseDeduct, personalDeduct, netIncome, tax: estimatedTax } = estimateTax({
+    income: totalIncome,
+    actualExpenses: totalPurchases + wagesPaid,
+    method: expenseMethod,
+    isHalfYear,
+  });
+  const expenseLabel = EXPENSE_METHOD_LABELS[expenseMethod];
   const periodLabel = isHalfYear ? `1 ม.ค. – 30 มิ.ย. ${TAX_YEAR_BE} (ครึ่งปีแรก)` : `1 ม.ค. – 31 ธ.ค. ${TAX_YEAR_BE} (เต็มปี)`;
   // Reactive to the ภงด.90/94 toggle — ภงด.94 only ever sums Jan-Jun (see lastMonthIndex
   // above), so the label next to that sum must say so too instead of always claiming
   // "up to the current month," which overstates the period an ภงด.94 total actually covers.
   const ytdLabel = isHalfYear ? 'ม.ค.–มิ.ย.' : `ม.ค.–${THIS_MONTH_SHORT}`;
-  const netIncome = Math.max(totalIncome - expenseDeduct - personalDeduct, 0);
-  const estimatedTax = calcProgressiveTax(netIncome);
 
   function handleExport() {
     exportCsv(
       'tax-report.csv',
-      ['เดือน', 'ยอดรับซื้อ', 'น้ำหนักรวม', 'ใบเสร็จ'],
-      monthly.map((m) => [m.m, m.amt.toFixed(2), `${m.weightKg.toLocaleString('th-TH')} กก.`, `${m.receiptCount} ใบ`])
+      ['เดือน', 'ยอดขาย (เงินได้)', 'ต้นทุนรับซื้อ', 'น้ำหนักรับซื้อ', 'ใบเสร็จ'],
+      monthly.map((m) => [m.m, m.sales.toFixed(2), m.purchases.toFixed(2), `${m.weightKg.toLocaleString('th-TH')} กก.`, `${m.receiptCount} ใบ`])
     );
   }
 
@@ -135,7 +135,7 @@ export default function TaxReport() {
             <IconTax />
           </div>
           <div>
-            <div className="stat-label">รายได้รวมทั้งปี</div>
+            <div className="stat-label">รายได้รวม (ยอดขาย)</div>
             <div className="stat-value">{money(totalIncome)}</div>
             <div className="stat-foot">ถึงปัจจุบัน ({ytdLabel})</div>
           </div>
@@ -145,9 +145,9 @@ export default function TaxReport() {
             <IconSplit />
           </div>
           <div>
-            <div className="stat-label">หักค่าใช้จ่าย (60%)</div>
+            <div className="stat-label">{expenseLabel}</div>
             <div className="stat-value">{money(expenseDeduct)}</div>
-            <div className="stat-foot">เหมาจ่ายตามประเภทเงินได้</div>
+            <div className="stat-foot">{expenseMethod === 'actual' ? 'ต้นทุนรับซื้อ + เงินเดือน' : 'เหมาจ่ายตามประเภทเงินได้'}</div>
           </div>
         </div>
         <div className="stat-card">
@@ -156,7 +156,7 @@ export default function TaxReport() {
           </div>
           <div>
             <div className="stat-label">เงินได้สุทธิ</div>
-            <div className="stat-value">{money(totalIncome - expenseDeduct)}</div>
+            <div className="stat-value">{money(netIncome)}</div>
             <div className="stat-foot">หลังหักค่าใช้จ่ายและลดหย่อน</div>
           </div>
         </div>
@@ -221,23 +221,25 @@ export default function TaxReport() {
                   <IconCalendarBars />
                   รายได้แยกตามเดือน
                 </div>
-                <div className="card-sub">ยอดรับซื้อของเก่าถือเป็นเงินได้ก่อนหักค่าใช้จ่าย</div>
+                <div className="card-sub">เงินได้คือยอดขายให้ผู้รับซื้อ (ใบส่งของ) — ยอดรับซื้อของเก่าเป็นต้นทุน</div>
               </div>
             </div>
             <table className="data-table">
               <thead>
                 <tr>
-                  <th style={{ width: '34%' }}>เดือน</th>
-                  <th style={{ width: '22%' }}>ยอดรับซื้อ</th>
-                  <th style={{ width: '22%' }}>น้ำหนักรวม</th>
-                  <th style={{ width: '22%' }}>ใบเสร็จ</th>
+                  <th style={{ width: '28%' }}>เดือน</th>
+                  <th style={{ width: '20%' }}>ยอดขาย (เงินได้)</th>
+                  <th style={{ width: '20%' }}>ต้นทุนรับซื้อ</th>
+                  <th style={{ width: '18%' }}>น้ำหนักรับซื้อ</th>
+                  <th style={{ width: '14%' }}>ใบเสร็จ</th>
                 </tr>
               </thead>
               <tbody>
                 {monthly.map((m) => (
                   <tr key={m.m}>
                     <td>{m.m}</td>
-                    <td className="num-cell">{money(m.amt)}</td>
+                    <td className="num-cell">{money(m.sales)}</td>
+                    <td className="num-cell">{money(m.purchases)}</td>
                     <td className="num-cell">{m.weightKg.toLocaleString('th-TH')} กก.</td>
                     <td className="num-cell">{m.receiptCount} ใบ</td>
                   </tr>
@@ -245,6 +247,7 @@ export default function TaxReport() {
                 <tr style={{ fontWeight: 600, background: 'var(--green-50)' }}>
                   <td>รวมทั้งสิ้น ({ytdLabel})</td>
                   <td className="num-cell">{money(totalIncome)}</td>
+                  <td className="num-cell">{money(totalPurchases)}</td>
                   <td className="num-cell">{totalWeightKg.toLocaleString('th-TH')} กก.</td>
                   <td className="num-cell">{totalReceiptCount} ใบ</td>
                 </tr>
@@ -264,12 +267,19 @@ export default function TaxReport() {
               <IconSplit />
               คำนวณภาษีเบื้องต้น
             </div>
+            <div className="filter-tabs" style={{ width: '100%', marginBottom: 12 }}>
+              {[['actual', 'ตามจริง'], ['flat60', 'เหมา 60%']].map(([key, shortLabel]) => (
+                <button key={key} type="button" style={{ flex: 1 }} className={`filter-tab${expenseMethod === key ? ' active' : ''}`} onClick={() => setExpenseMethod(key)}>
+                  {shortLabel}
+                </button>
+              ))}
+            </div>
             <div className="sum-row">
-              <span className="label">รายได้รวม</span>
+              <span className="label">รายได้รวม (ยอดขาย)</span>
               <span className="val">{money(totalIncome)}</span>
             </div>
             <div className="sum-row">
-              <span className="label">หักค่าใช้จ่ายเหมา 60%</span>
+              <span className="label">{expenseLabel}</span>
               <span className="val minus">−{money(expenseDeduct)}</span>
             </div>
             <div className="sum-row">
@@ -350,8 +360,9 @@ export default function TaxReport() {
             <thead>
               <tr>
                 <th>เดือน</th>
-                <th className="num">ยอดรับซื้อ</th>
-                <th className="num">น้ำหนักรวม</th>
+                <th className="num">ยอดขาย (เงินได้)</th>
+                <th className="num">ต้นทุนรับซื้อ</th>
+                <th className="num">น้ำหนักรับซื้อ</th>
                 <th className="num">ใบเสร็จ</th>
               </tr>
             </thead>
@@ -359,7 +370,8 @@ export default function TaxReport() {
               {monthly.map((m) => (
                 <tr key={m.m}>
                   <td>{m.m}</td>
-                  <td className="num">{money(m.amt)}</td>
+                  <td className="num">{money(m.sales)}</td>
+                  <td className="num">{money(m.purchases)}</td>
                   <td className="num">{m.weightKg.toLocaleString('th-TH')} กก.</td>
                   <td className="num">{m.receiptCount} ใบ</td>
                 </tr>
@@ -367,6 +379,7 @@ export default function TaxReport() {
               <tr className="a4-doc-total-row">
                 <td>รวมทั้งสิ้น ({ytdLabel})</td>
                 <td className="num">{money(totalIncome)}</td>
+                <td className="num">{money(totalPurchases)}</td>
                 <td className="num">{totalWeightKg.toLocaleString('th-TH')} กก.</td>
                 <td className="num">{totalReceiptCount} ใบ</td>
               </tr>
@@ -375,11 +388,11 @@ export default function TaxReport() {
 
           <div className="a4-doc-summary">
             <div className="a4-doc-sum-row">
-              <span>รายได้รวม</span>
+              <span>รายได้รวม (ยอดขาย)</span>
               <b>{money(totalIncome)}</b>
             </div>
             <div className="a4-doc-sum-row minus">
-              <span>หักค่าใช้จ่ายเหมา 60%</span>
+              <span>{expenseLabel}</span>
               <b>−{money(expenseDeduct)}</b>
             </div>
             <div className="a4-doc-sum-row minus">
