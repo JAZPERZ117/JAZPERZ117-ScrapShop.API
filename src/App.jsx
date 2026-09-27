@@ -29,6 +29,7 @@ import { PayrollProvider } from './context/PayrollContext.jsx';
 import { CategoriesProvider } from './context/CategoriesContext.jsx';
 import { ProductsProvider } from './context/ProductsContext.jsx';
 import { ScalesProvider } from './context/ScalesContext.jsx';
+import { ScaleReaderProvider } from './context/ScaleReaderContext.jsx';
 import { UsersProvider } from './context/UsersContext.jsx';
 import { SettingsProvider } from './context/SettingsContext.jsx';
 import { PrintersProvider } from './context/PrintersContext.jsx';
@@ -70,6 +71,7 @@ export default function App() {
     <CategoriesProvider>
     <ProductsProvider>
     <ScalesProvider>
+    <ScaleReaderProvider>
     <UsersProvider>
     <SettingsProvider>
     <PrintersProvider>
@@ -110,6 +112,7 @@ export default function App() {
     </PrintersProvider>
     </SettingsProvider>
     </UsersProvider>
+    </ScaleReaderProvider>
     </ScalesProvider>
     </ProductsProvider>
     </CategoriesProvider>
