@@ -5,6 +5,8 @@ import { useSettings } from '../context/SettingsContext.jsx';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
+import { useDeliveries } from '../context/DeliveriesContext.jsx';
+import { sumSales, signedMoney } from '../lib/finance.js';
 import './MonthlyReport.css';
 
 const DAYS = Array.from({ length: 31 }, (_, i) => String(i + 1));
@@ -108,6 +110,7 @@ export default function MonthlyReport() {
   const { receipts, order: receiptOrder } = useReceipts();
   const { products } = useProducts();
   const { order: staffOrder, payHistory } = usePayroll();
+  const { deliveries, order: deliveryOrder } = useDeliveries();
 
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
   // Which month this report shows — defaults to the real current month, but the date field
@@ -157,7 +160,8 @@ export default function MonthlyReport() {
       return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
     })
     .reduce((s, p) => s + (p.net || 0), 0);
-  const netProfit = Math.max(monthTotal - wagesPaid, 0);
+  const monthSales = sumSales(deliveries, deliveryOrder, (date) => date.startsWith(selectedMonth));
+  const netProfit = monthSales - monthTotal - wagesPaid;
 
   const categoryRows = useMemo(() => {
     const byCat = {};
@@ -259,9 +263,9 @@ export default function MonthlyReport() {
           </div>
           <div>
             <div className="stat-label">กำไรสุทธิเดือนนี้</div>
-            <div className="stat-value">{money(netProfit)}</div>
+            <div className="stat-value" style={{ color: netProfit < 0 ? 'var(--rose)' : undefined }}>{signedMoney(netProfit)}</div>
             <div className="stat-foot" style={{ color: 'var(--ink-500)' }}>
-              หลังหักเงินเดือน
+              ยอดขาย − ยอดรับซื้อ − เงินเดือน
             </div>
           </div>
         </div>
@@ -270,10 +274,10 @@ export default function MonthlyReport() {
             <IconCash />
           </div>
           <div>
-            <div className="stat-label">เงินเดือนที่จ่ายไปแล้ว</div>
-            <div className="stat-value">{money(wagesPaid)}</div>
+            <div className="stat-label">ยอดขายให้ผู้รับซื้อเดือนนี้</div>
+            <div className="stat-value">{money(monthSales)}</div>
             <div className="stat-foot" style={{ color: 'var(--ink-500)' }}>
-              {staffOrder.length} คนในระบบ
+              จากใบส่งของ
             </div>
           </div>
         </div>
@@ -367,19 +371,23 @@ export default function MonthlyReport() {
           <div className="card card-pad">
             <div className="card-title" style={{ marginBottom: 14 }}>
               <IconCash />
-              ค่าใช้จ่ายเดือนนี้
+              กำไรขาดทุนเดือนนี้
+            </div>
+            <div className="sum-row">
+              <span className="label">ยอดขายให้ผู้รับซื้อ</span>
+              <span className="val">{money(monthSales)}</span>
+            </div>
+            <div className="sum-row">
+              <span className="label">ต้นทุนรับซื้อของ</span>
+              <span className="val minus">−{money(monthTotal)}</span>
             </div>
             <div className="sum-row">
               <span className="label">เงินเดือนลูกน้อง {staffOrder.length} คน</span>
-              <span className="val">{money(wagesPaid)}</span>
-            </div>
-            <div className="sum-row">
-              <span className="label">หักน้ำหนัก/เหตุผล</span>
-              <span className="val">{totalDeductionKg.toFixed(2)} กก.</span>
+              <span className="val minus">−{money(wagesPaid)}</span>
             </div>
             <div className="grand-total">
               <span className="label">กำไรสุทธิ</span>
-              <span className="val">{money(netProfit)}</span>
+              <span className="val" style={{ color: netProfit < 0 ? 'var(--rose)' : undefined }}>{signedMoney(netProfit)}</span>
             </div>
           </div>
 
@@ -413,12 +421,12 @@ export default function MonthlyReport() {
               <b>{monthWeight.toLocaleString('th-TH')} กก.</b>
             </div>
             <div className="a4-doc-meta-row">
-              <span>กำไรสุทธิเดือนนี้</span>
-              <b>{money(netProfit)}</b>
+              <span>ยอดขายให้ผู้รับซื้อ</span>
+              <b>{money(monthSales)}</b>
             </div>
             <div className="a4-doc-meta-row">
-              <span>เงินเดือนที่จ่ายไปแล้ว</span>
-              <b>{money(wagesPaid)}</b>
+              <span>กำไรสุทธิเดือนนี้</span>
+              <b>{signedMoney(netProfit)}</b>
             </div>
           </div>
 
@@ -449,16 +457,20 @@ export default function MonthlyReport() {
               </div>
             ))}
             <div className="a4-doc-sum-row">
-              <span>เงินเดือนลูกน้อง {staffOrder.length} คน</span>
-              <b>{money(wagesPaid)}</b>
+              <span>ยอดขายให้ผู้รับซื้อ</span>
+              <b>{money(monthSales)}</b>
             </div>
-            <div className="a4-doc-sum-row">
-              <span>หักน้ำหนัก/เหตุผล</span>
-              <b>{totalDeductionKg.toFixed(2)} กก.</b>
+            <div className="a4-doc-sum-row minus">
+              <span>ต้นทุนรับซื้อของ</span>
+              <b>−{money(monthTotal)}</b>
+            </div>
+            <div className="a4-doc-sum-row minus">
+              <span>เงินเดือนลูกน้อง {staffOrder.length} คน</span>
+              <b>−{money(wagesPaid)}</b>
             </div>
             <div className="a4-doc-grand">
               <span>กำไรสุทธิ</span>
-              <span>{money(netProfit)}</span>
+              <span>{signedMoney(netProfit)}</span>
             </div>
           </div>
 

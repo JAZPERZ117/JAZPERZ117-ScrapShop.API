@@ -21,6 +21,8 @@ import { useProducts } from '../context/ProductsContext.jsx';
 import { useCategories } from '../context/CategoriesContext.jsx';
 import { useCustomers } from '../context/CustomersContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
+import { useDeliveries } from '../context/DeliveriesContext.jsx';
+import { sumSales, signedMoney, estimateTax, EXPENSE_METHOD_LABELS } from '../lib/finance.js';
 import './PrintCenter.css';
 
 const PAY_METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', promptpay: 'พร้อมเพย์' };
@@ -32,28 +34,6 @@ const THIS_MONTH_THAI_LONG = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { mo
 const THIS_MONTH_THAI_SHORT_TH = new Intl.DateTimeFormat('th-TH', { month: 'short' }).format(NOW);
 const THIS_YEAR_BE = NOW.getFullYear() + 543;
 const MONTH_LABELS_FULL = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
-
-const TAX_BRACKETS = [
-  { upTo: 150000, rate: 0 },
-  { upTo: 300000, rate: 0.05 },
-  { upTo: 500000, rate: 0.1 },
-  { upTo: 750000, rate: 0.15 },
-  { upTo: 1000000, rate: 0.2 },
-  { upTo: 2000000, rate: 0.25 },
-  { upTo: 5000000, rate: 0.3 },
-  { upTo: Infinity, rate: 0.35 },
-];
-
-function calcProgressiveTax(netIncome) {
-  let tax = 0;
-  let lower = 0;
-  for (const bracket of TAX_BRACKETS) {
-    if (netIncome <= lower) break;
-    tax += (Math.min(netIncome, bracket.upTo) - lower) * bracket.rate;
-    lower = bracket.upTo;
-  }
-  return tax;
-}
 
 function money(n) {
   return '฿' + (n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -116,7 +96,7 @@ const DOCS = {
   receipt: { name: 'ใบเสร็จรับเงิน', bg: 'var(--green-100)', fg: 'var(--green-700)', Icon: IconReceipt, desc: 'พิมพ์ใบเสร็จรับซื้อของเก่าตามเลขที่ใบเสร็จ' },
   payslip: { name: 'สลิปเงินเดือน', bg: 'var(--blue-bg)', fg: 'var(--blue)', Icon: IconPayroll, desc: 'พิมพ์สลิปเงินเดือนจากประวัติการจ่ายจริง' },
   daily: { name: 'สรุปยอดประจำวัน', bg: 'var(--amber-bg)', fg: 'var(--amber)', Icon: IconBarChart, desc: 'รายงานยอดรับซื้อ น้ำหนัก และเงินสดของวันนี้' },
-  monthly: { name: 'รายงานประจำเดือน', bg: 'var(--teal-bg, #E4F6F4)', fg: 'var(--teal, #0E8E82)', Icon: IconCalendarBars, desc: 'สรุปยอดรับซื้อ-จ่ายเงินเดือนนี้' },
+  monthly: { name: 'รายงานประจำเดือน', bg: 'var(--teal-bg, #E4F6F4)', fg: 'var(--teal, #0E8E82)', Icon: IconCalendarBars, desc: 'สรุปยอดขาย ต้นทุนรับซื้อ เงินเดือน และกำไรเดือนนี้' },
   pricetag: { name: 'ป้ายราคาสินค้า', bg: 'var(--plum-bg)', fg: 'var(--plum)', Icon: IconTag, desc: 'พิมพ์ป้ายราคารับซื้อล่าสุดติดหน้าร้าน' },
   idcard: { name: 'บัตรสมาชิกลูกค้า', bg: 'var(--rose-bg)', fg: 'var(--rose)', Icon: IconIdCard, desc: 'พิมพ์บัตรสมาชิกให้ลูกค้าที่มีอยู่ในระบบ' },
   tax: { name: 'เอกสารภาษี ภงด.90/94', bg: 'var(--bg)', fg: 'var(--ink-500)', Icon: IconTax, desc: 'พิมพ์แบบสรุปรายได้สำหรับยื่นภาษี' },
@@ -138,6 +118,7 @@ export default function PrintCenter() {
   const { categories, order: categoryOrder } = useCategories();
   const { customers, order: customerOrder } = useCustomers();
   const { settings } = useSettings();
+  const { deliveries, order: deliveryOrder } = useDeliveries();
 
   // Every receipt now carries a real date, so each month's figures below are computed
   // directly from actual data instead of a "historical demo months + real current month"
@@ -163,6 +144,7 @@ export default function PrintCenter() {
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState(customerOrder[0]);
   const [taxForm, setTaxForm] = useState('90');
+  const [taxExpenseMethod, setTaxExpenseMethod] = useState('actual');
   // Narrows the payslip picker to payments made on a chosen date, keeping each option's
   // real index into `payHistory` (what selectedPayIdx actually addresses) rather than a
   // filtered-array position, so picking a narrowed option still resolves the right record.
@@ -386,6 +368,16 @@ export default function PrintCenter() {
               <select className="input-plain" value={taxForm} onChange={(e) => setTaxForm(e.target.value)}>
                 <option value="90">ภงด.90 (ประจำปี)</option>
                 <option value="94">ภงด.94 (ครึ่งปี)</option>
+              </select>
+            </div>
+            <div className="field">
+              <label>วิธีหักค่าใช้จ่าย</label>
+              <select className="input-plain" value={taxExpenseMethod} onChange={(e) => setTaxExpenseMethod(e.target.value)}>
+                {Object.entries(EXPENSE_METHOD_LABELS).map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
               </select>
             </div>
           </>
@@ -617,7 +609,9 @@ export default function PrintCenter() {
     const cashPaidToStaff = payHistory
       .filter((p) => p.payMethod === 'cash' && isToday(p.paidAt))
       .reduce((sum, p) => sum + (p.net || 0), 0);
-    const netCash = cashFromPurchases - cashPaidToStaff;
+    // Both are cash going out of the drawer — their sum, not their difference.
+    const cashOut = cashFromPurchases + cashPaidToStaff;
+    const salesToday = sumSales(deliveries, deliveryOrder, (date) => date === todayISO());
     return (
       <div className="a4-doc">
         {renderA4Top(`สรุปยอดประจำวัน · ${TODAY_THAI_LONG}`)}
@@ -642,16 +636,20 @@ export default function PrintCenter() {
         </div>
         <div className="a4-doc-summary">
           <div className="a4-doc-sum-row">
+            <span>ยอดขายให้ผู้รับซื้อวันนี้</span>
+            <b>{money(salesToday)}</b>
+          </div>
+          <div className="a4-doc-sum-row minus">
             <span>รับซื้อด้วยเงินสด</span>
-            <b>{money(cashFromPurchases)}</b>
+            <b>−{money(cashFromPurchases)}</b>
           </div>
           <div className="a4-doc-sum-row minus">
             <span>จ่ายเงินเดือนด้วยเงินสด</span>
             <b>−{money(cashPaidToStaff)}</b>
           </div>
           <div className="a4-doc-sum-row">
-            <span>เงินสดสุทธิวันนี้</span>
-            <b>{money(netCash)}</b>
+            <span>รวมเงินสดจ่ายออกวันนี้</span>
+            <b>−{money(cashOut)}</b>
           </div>
         </div>
         <div className="a4-doc-foot">พิมพ์เมื่อ {nowStr()}</div>
@@ -660,12 +658,14 @@ export default function PrintCenter() {
   }
 
   function renderMonthlyDoc() {
-    const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
+    const monthKey = `${NOW.getFullYear()}-${String(NOW.getMonth() + 1).padStart(2, '0')}`;
+    const monthReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void' && (receipts[id].date || '').startsWith(monthKey));
     const thisMonth = monthlyBreakdownForYear(NOW.getFullYear())[NOW.getMonth()];
     const monthTotal = thisMonth.amt;
     const monthCount = thisMonth.receiptCount;
     const monthWeight = thisMonth.weightKg;
-    const totalDeductionKg = activeReceipts.reduce((s, id) => s + (receipts[id].deductionWeight || 0), 0);
+    const totalDeductionKg = monthReceipts.reduce((s, id) => s + (receipts[id].deductionWeight || 0), 0);
+    const monthSales = sumSales(deliveries, deliveryOrder, (date) => date.startsWith(monthKey));
     // Real payroll payments only, scoped to this calendar month — payHistory persists
     // indefinitely, so summing it unfiltered would silently pull in prior months' wages too
     // once payroll has run more than once, overstating this figure and understating
@@ -677,7 +677,7 @@ export default function PrintCenter() {
         return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
       })
       .reduce((s, p) => s + (p.net || 0), 0);
-    const netProfit = Math.max(monthTotal - wagesPaid, 0);
+    const netProfit = monthSales - monthTotal - wagesPaid;
     return (
       <div className="a4-doc">
         {renderA4Top(`รายงานประจำเดือน · ${THIS_MONTH_THAI_LONG}`)}
@@ -702,8 +702,12 @@ export default function PrintCenter() {
         </div>
         <div className="a4-doc-summary">
           <div className="a4-doc-sum-row">
-            <span>ยอดรับซื้อรวม</span>
-            <b>{money(monthTotal)}</b>
+            <span>ยอดขายให้ผู้รับซื้อ</span>
+            <b>{money(monthSales)}</b>
+          </div>
+          <div className="a4-doc-sum-row minus">
+            <span>ต้นทุนรับซื้อของ</span>
+            <b>−{money(monthTotal)}</b>
           </div>
           <div className="a4-doc-sum-row minus">
             <span>เงินเดือนที่จ่ายไปแล้ว</span>
@@ -711,7 +715,7 @@ export default function PrintCenter() {
           </div>
           <div className="a4-doc-sum-row">
             <span>กำไรสุทธิเดือนนี้</span>
-            <b>{money(netProfit)}</b>
+            <b>{signedMoney(netProfit)}</b>
           </div>
         </div>
         <div className="a4-doc-foot">พิมพ์เมื่อ {nowStr()}</div>
@@ -722,17 +726,33 @@ export default function PrintCenter() {
   function renderTaxDoc() {
     const isHalfYear = taxForm === '94';
     const lastMonthIndex = isHalfYear ? Math.min(5, NOW.getMonth()) : NOW.getMonth();
-    const monthly = monthlyBreakdownForYear(NOW.getFullYear())
+    const year = NOW.getFullYear();
+    // Taxable income is sales to buyers (Deliveries); purchases from sellers are cost — same
+    // definitions as TaxReport.jsx, via the shared lib/finance.js helpers.
+    const monthly = monthlyBreakdownForYear(year)
       .slice(0, lastMonthIndex + 1)
-      .map((m, i) => ({ ...m, m: `${MONTH_LABELS_FULL[i]} ${THIS_YEAR_BE}` }));
-    const totalIncome = monthly.reduce((s, m) => s + m.amt, 0);
+      .map((m, i) => ({
+        ...m,
+        m: `${MONTH_LABELS_FULL[i]} ${THIS_YEAR_BE}`,
+        sales: sumSales(deliveries, deliveryOrder, (date) => date.startsWith(`${year}-${String(i + 1).padStart(2, '0')}`)),
+      }));
+    const totalIncome = monthly.reduce((s, m) => s + m.sales, 0);
+    const totalPurchases = monthly.reduce((s, m) => s + m.amt, 0);
     const totalWeightKg = monthly.reduce((s, m) => s + m.weightKg, 0);
     const totalReceiptCount = monthly.reduce((s, m) => s + m.receiptCount, 0);
-    const expenseDeduct = totalIncome * 0.6;
-    const personalDeduct = isHalfYear ? 30000 : 60000;
+    const wagesPaid = payHistory
+      .filter((p) => {
+        const d = new Date(p.paidAt);
+        return d.getFullYear() === year && d.getMonth() <= lastMonthIndex;
+      })
+      .reduce((s, p) => s + (p.net || 0), 0);
+    const { expenseDeduct, personalDeduct, netIncome, tax: estimatedTax } = estimateTax({
+      income: totalIncome,
+      actualExpenses: totalPurchases + wagesPaid,
+      method: taxExpenseMethod,
+      isHalfYear,
+    });
     const periodLabel = isHalfYear ? `1 ม.ค. – 30 มิ.ย. ${THIS_YEAR_BE} (ครึ่งปีแรก)` : `1 ม.ค. – 31 ธ.ค. ${THIS_YEAR_BE} (เต็มปี)`;
-    const netIncome = Math.max(totalIncome - expenseDeduct - personalDeduct, 0);
-    const estimatedTax = calcProgressiveTax(netIncome);
     return (
       <div className="a4-doc">
         {renderA4Top(`แบบสรุปรายได้สำหรับยื่นภาษี ภงด.${taxForm} · ปีภาษี ${THIS_YEAR_BE}`)}
@@ -759,8 +779,9 @@ export default function PrintCenter() {
           <thead>
             <tr>
               <th>เดือน</th>
-              <th className="num">ยอดรับซื้อ</th>
-              <th className="num">น้ำหนักรวม</th>
+              <th className="num">ยอดขาย (เงินได้)</th>
+              <th className="num">ต้นทุนรับซื้อ</th>
+              <th className="num">น้ำหนักรับซื้อ</th>
               <th className="num">ใบเสร็จ</th>
             </tr>
           </thead>
@@ -768,6 +789,7 @@ export default function PrintCenter() {
             {monthly.map((m) => (
               <tr key={m.m}>
                 <td>{m.m}</td>
+                <td className="num">{money(m.sales)}</td>
                 <td className="num">{money(m.amt)}</td>
                 <td className="num">{m.weightKg.toLocaleString('th-TH')} กก.</td>
                 <td className="num">{m.receiptCount} ใบ</td>
@@ -776,6 +798,7 @@ export default function PrintCenter() {
             <tr className="a4-doc-total-row">
               <td>รวมทั้งสิ้น (ม.ค.–{THIS_MONTH_THAI_SHORT_TH})</td>
               <td className="num">{money(totalIncome)}</td>
+              <td className="num">{money(totalPurchases)}</td>
               <td className="num">{totalWeightKg.toLocaleString('th-TH')} กก.</td>
               <td className="num">{totalReceiptCount} ใบ</td>
             </tr>
@@ -783,11 +806,11 @@ export default function PrintCenter() {
         </table>
         <div className="a4-doc-summary">
           <div className="a4-doc-sum-row">
-            <span>รายได้รวม</span>
+            <span>รายได้รวม (ยอดขาย)</span>
             <b>{money(totalIncome)}</b>
           </div>
           <div className="a4-doc-sum-row minus">
-            <span>หักค่าใช้จ่ายเหมา 60%</span>
+            <span>{EXPENSE_METHOD_LABELS[taxExpenseMethod]}</span>
             <b>−{money(expenseDeduct)}</b>
           </div>
           <div className="a4-doc-sum-row minus">

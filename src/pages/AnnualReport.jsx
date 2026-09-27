@@ -6,6 +6,8 @@ import { useProducts } from '../context/ProductsContext.jsx';
 import { useCustomers } from '../context/CustomersContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
+import { useDeliveries } from '../context/DeliveriesContext.jsx';
+import { sumSales, signedMoney } from '../lib/finance.js';
 import './AnnualReport.css';
 
 const MONTH_LABELS_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
@@ -67,6 +69,7 @@ export default function AnnualReport() {
   const { order: customerOrder, customers } = useCustomers();
   const { payHistory } = usePayroll();
   const { settings } = useSettings();
+  const { deliveries, order: deliveryOrder } = useDeliveries();
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
 
   const realNow = new Date();
@@ -103,7 +106,7 @@ export default function AnnualReport() {
     return months;
   }, [yearActiveReceipts, receipts]);
 
-  const ytdRevenue = monthlyBreakdown.reduce((s, m) => s + m.amt, 0);
+  const ytdPurchases = monthlyBreakdown.reduce((s, m) => s + m.amt, 0);
   const ytdWeight = monthlyBreakdown.reduce((s, m) => s + m.weight, 0);
   const ytdReceiptCount = monthlyBreakdown.reduce((s, m) => s + m.count, 0);
 
@@ -144,7 +147,8 @@ export default function AnnualReport() {
   const wagesPaid = payHistory
     .filter((p) => new Date(p.paidAt).getFullYear() === currentYear)
     .reduce((s, p) => s + (p.net || 0), 0);
-  const netProfit = Math.max(ytdRevenue - wagesPaid, 0);
+  const ytdSales = sumSales(deliveries, deliveryOrder, (date) => date.startsWith(`${currentYear}-`));
+  const netProfit = ytdSales - ytdPurchases - wagesPaid;
   // "ลูกค้าใหม่ทั้งปี" means new this calendar year, not "ever added since install" — scope by
   // actual createdAt instead of just excluding the seed customers.
   const newCustomerIds = customerOrder.filter((id) => {
@@ -234,7 +238,7 @@ export default function AnnualReport() {
           </div>
           <div>
             <div className="stat-label">ยอดรับซื้อรวมปีนี้</div>
-            <div className="stat-value">{money(ytdRevenue)}</div>
+            <div className="stat-value">{money(ytdPurchases)}</div>
             <div className="stat-foot" style={{ color: 'var(--ink-500)' }}>
               สะสมตั้งแต่ต้นปี
             </div>
@@ -258,9 +262,9 @@ export default function AnnualReport() {
           </div>
           <div>
             <div className="stat-label">กำไรสุทธิทั้งปี</div>
-            <div className="stat-value">{money(netProfit)}</div>
+            <div className="stat-value" style={{ color: netProfit < 0 ? 'var(--rose)' : undefined }}>{signedMoney(netProfit)}</div>
             <div className="stat-foot" style={{ color: 'var(--ink-500)' }}>
-              หลังหักเงินเดือน
+              ขาย {money(ytdSales)} − รับซื้อ − เงินเดือน {money(wagesPaid)}
             </div>
           </div>
         </div>
@@ -422,15 +426,19 @@ export default function AnnualReport() {
           <div className="a4-doc-meta-grid">
             <div className="a4-doc-meta-row">
               <span>ยอดรับซื้อรวมปีนี้</span>
-              <b>{money(ytdRevenue)}</b>
+              <b>{money(ytdPurchases)}</b>
             </div>
             <div className="a4-doc-meta-row">
               <span>น้ำหนักรวมทั้งปี</span>
               <b>{ytdWeight.toLocaleString('th-TH')} กก.</b>
             </div>
             <div className="a4-doc-meta-row">
+              <span>ยอดขายให้ผู้รับซื้อทั้งปี</span>
+              <b>{money(ytdSales)}</b>
+            </div>
+            <div className="a4-doc-meta-row">
               <span>กำไรสุทธิทั้งปี</span>
-              <b>{money(netProfit)}</b>
+              <b>{signedMoney(netProfit)}</b>
             </div>
             <div className="a4-doc-meta-row">
               <span>ลูกค้าใหม่ทั้งปี</span>
@@ -480,9 +488,21 @@ export default function AnnualReport() {
                 <b>{money(c.amt)}</b>
               </div>
             ))}
+            <div className="a4-doc-sum-row">
+              <span>ยอดขายให้ผู้รับซื้อ</span>
+              <b>{money(ytdSales)}</b>
+            </div>
+            <div className="a4-doc-sum-row minus">
+              <span>ต้นทุนรับซื้อของ</span>
+              <b>−{money(ytdPurchases)}</b>
+            </div>
+            <div className="a4-doc-sum-row minus">
+              <span>เงินเดือนลูกน้อง</span>
+              <b>−{money(wagesPaid)}</b>
+            </div>
             <div className="a4-doc-grand">
               <span>กำไรสุทธิทั้งปี</span>
-              <span>{money(netProfit)}</span>
+              <span>{signedMoney(netProfit)}</span>
             </div>
           </div>
 
