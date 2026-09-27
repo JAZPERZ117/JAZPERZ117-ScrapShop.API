@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { IconScale, IconCheck, IconPlus, IconTare, IconRefresh, IconClockHistory, IconWarningTriangle, IconX, IconEdit, IconTrash } from '../icons.jsx';
 import RowMenu from '../components/RowMenu.jsx';
 import { useScales, BLANK_DEVICE } from '../context/ScalesContext.jsx';
+import { useScaleReader } from '../context/ScaleReaderContext.jsx';
 import './Scales.css';
 
 const todayThai = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date());
@@ -10,17 +11,12 @@ function nowTimeStr() {
   return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
 }
 
-// Devices a network scan (จำลอง) can discover, one at a time, until the pool runs out —
-// filtered against the current `order` so an already-added device is never "found" twice.
-const DISCOVERABLE_POOL = [
-  { id: 'wireless1', name: 'เครื่องชั่งไร้สายจุดรับซื้อ 2', model: 'CAS PB-60 60kg', bg: 'var(--amber-bg)', fg: 'var(--amber)', port: 'WS-PB60-7A', conn: 'Wi-Fi', max: '60 กก.', res: '0.01 กก.', cal: 'ยังไม่เคยสอบเทียบ', due: '—', status: 'on', active: false },
-  { id: 'wireless2', name: 'เครื่องชั่งคลังสินค้า', model: 'A&D FG-150KAM 150kg', bg: 'var(--teal-bg, #E4F6F4)', fg: 'var(--teal, #0E8E82)', port: 'FG150-C3', conn: 'Bluetooth', max: '150 กก.', res: '0.05 กก.', cal: 'ยังไม่เคยสอบเทียบ', due: '—', status: 'on', active: false },
-];
+const BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 115200];
 
 export default function Scales() {
   const { devices, order, activity, logActivity, createDevice, updateDevice, setActiveDevice, toggleConnected, deleteDevice } = useScales();
+  const reader = useScaleReader();
   const [selectedId, setSelectedId] = useState(order[0]);
-  const [liveWeight, setLiveWeight] = useState(0);
   const [editName, setEditName] = useState(devices[order[0]]?.name || '');
   const [editConn, setEditConn] = useState(devices[order[0]]?.conn || '');
   const [editPort, setEditPort] = useState(devices[order[0]]?.port || '');
@@ -50,22 +46,16 @@ export default function Scales() {
     setEditName(devices[id].name);
     setEditConn(devices[id].conn);
     setEditPort(devices[id].port);
-    setLiveWeight(0);
   }
 
-  function simulate() {
-    if (d.status !== 'on') {
-      setBanner({ type: 'error', text: `${d.name} ไม่ได้เชื่อมต่ออยู่ — กดเชื่อมต่อก่อนอ่านค่าน้ำหนัก` });
-      return;
-    }
-    setLiveWeight(Number((Math.random() * 60 + 1).toFixed(2)));
-  }
+  // Tare here is a software offset on this computer's live reading (ScaleReaderContext) — the
+  // scale's own physical tare button works too and needs no action here.
   function tare() {
-    if (d.status !== 'on') {
-      setBanner({ type: 'error', text: `${d.name} ไม่ได้เชื่อมต่ออยู่ — กดเชื่อมต่อก่อนตั้งค่าศูนย์` });
+    if (reader.status !== 'connected' || !reader.reading) {
+      setBanner({ type: 'error', text: 'ยังไม่ได้เชื่อมต่อเครื่องชั่ง — กด "เชื่อมต่อเครื่องชั่ง" ก่อน' });
       return;
     }
-    setLiveWeight(0);
+    reader.tare();
   }
   // "ใช้เป็นเครื่องชั่งหลัก" is exclusive — only one device can be the one ScrapPurchase.jsx
   // reads from, so the server clears every other device's flag in the same request.
@@ -75,23 +65,6 @@ export default function Scales() {
     } catch (err) {
       setBanner({ type: 'error', text: err.message });
     }
-  }
-
-  async function handleScan() {
-    const found = DISCOVERABLE_POOL.find((dev) => !order.includes(dev.id));
-    if (!found) {
-      setBanner({ type: 'info', text: 'สแกนเครือข่ายแล้ว — ไม่พบเครื่องชั่งใหม่เพิ่มเติม' });
-      return;
-    }
-    const { id: _id, ...rest } = found;
-    try {
-      await createDevice({ ...rest, atEnd: true });
-    } catch (err) {
-      setBanner({ type: 'error', text: err.message });
-      return;
-    }
-    await logActivity({ icon: 'ok', title: `พบเครื่องชั่งใหม่ · ${rest.name}`, sub: `${todayThai} · ${nowTimeStr()} จากการสแกนเครือข่าย`, amt: 'เพิ่มเข้าระบบแล้ว' });
-    setBanner({ type: 'success', text: `สแกนเครือข่ายพบเครื่องชั่งใหม่ 1 เครื่อง: "${rest.name}" — เพิ่มเข้าระบบแล้ว` });
   }
 
   async function handleCreate(e) {
@@ -121,8 +94,26 @@ export default function Scales() {
     setBanner({ type: 'success', text: `บันทึกการตั้งค่าของ "${editName.trim() || d.name}" แล้ว` });
   }
 
+  // A real check against a known test weight: the owner puts a certified weight on the scale,
+  // enters its nominal value, and the actual deviation is what gets recorded. This used to log a
+  // random "คลาดเคลื่อน" number as if a calibration had been measured.
   async function handleCalibrate() {
-    const drift = (Math.random() * 0.1).toFixed(2);
+    if (reader.status !== 'connected' || !reader.reading) {
+      setBanner({ type: 'error', text: 'ต้องเชื่อมต่อเครื่องชั่งก่อน จึงจะสอบเทียบกับตุ้มน้ำหนักมาตรฐานได้' });
+      return;
+    }
+    if (!reader.reading.stable) {
+      setBanner({ type: 'error', text: 'น้ำหนักยังไม่นิ่ง — รอให้เครื่องชั่งนิ่งแล้วกดสอบเทียบอีกครั้ง' });
+      return;
+    }
+    const input = window.prompt('วางตุ้มน้ำหนักมาตรฐานบนเครื่องชั่ง แล้วกรอกน้ำหนักที่ระบุบนตุ้ม (กก.)');
+    if (input === null) return;
+    const nominal = parseFloat(input);
+    if (!(nominal > 0)) {
+      setBanner({ type: 'error', text: 'กรุณากรอกน้ำหนักตุ้มมาตรฐานเป็นตัวเลขมากกว่า 0' });
+      return;
+    }
+    const drift = (reader.netWeight - nominal).toFixed(3);
     try {
       await updateDevice(selectedId, { cal: todayThai, due: '90 วัน', status: 'on' });
     } catch (err) {
@@ -130,7 +121,7 @@ export default function Scales() {
       return;
     }
     await logActivity({ icon: 'ok', title: `สอบเทียบสำเร็จ · ${d.name}`, sub: `${todayThai} · ${nowTimeStr()} โดยเจ้าของร้าน`, amt: `คลาดเคลื่อน ${drift} กก.` });
-    setBanner({ type: 'success', text: `สอบเทียบ "${d.name}" สำเร็จ — คลาดเคลื่อน ${drift} กก.` });
+    setBanner({ type: 'success', text: `บันทึกผลสอบเทียบ "${d.name}" — ตุ้ม ${nominal} กก. อ่านได้ ${reader.netWeight.toFixed(3)} กก. (คลาดเคลื่อน ${drift} กก.)` });
   }
 
   async function handleRemove(id = selectedId) {
@@ -169,10 +160,6 @@ export default function Scales() {
           <div className="page-sub">เชื่อมต่อ ปรับเทียบ และตรวจสอบสถานะเครื่องชั่งดิจิทัลของร้าน</div>
         </div>
         <div className="head-actions">
-          <button type="button" className="btn btn-ghost" onClick={handleScan}>
-            <IconRefresh />
-            สแกนหาเครื่องใหม่
-          </button>
           <button type="button" className="btn btn-primary" onClick={() => setShowNew((v) => !v)}>
             <IconPlus />
             เพิ่มเครื่องชั่ง
@@ -207,7 +194,7 @@ export default function Scales() {
           <div>
             <div className="stat-label">เครื่องชั่งทั้งหมด</div>
             <div className="stat-value">{order.length} เครื่อง</div>
-            <div className="stat-foot">เชื่อมต่ออยู่ {connectedCount}</div>
+            <div className="stat-foot">พร้อมใช้งาน {connectedCount}</div>
           </div>
         </div>
         <div className="stat-card">
@@ -215,9 +202,9 @@ export default function Scales() {
             <IconCheck />
           </div>
           <div>
-            <div className="stat-label">เชื่อมต่อสำเร็จ</div>
+            <div className="stat-label">พร้อมใช้งาน</div>
             <div className="stat-value">{connectedCount} เครื่อง</div>
-            <div className="stat-foot">พร้อมใช้งาน</div>
+            <div className="stat-foot">{reader.status === 'connected' ? 'คอมนี้เชื่อมเครื่องชั่งอยู่' : 'คอมนี้ยังไม่ได้เชื่อมเครื่องชั่ง'}</div>
           </div>
         </div>
         <div className="stat-card">
@@ -225,9 +212,9 @@ export default function Scales() {
             <IconWarningTriangle />
           </div>
           <div>
-            <div className="stat-label">ไม่ได้เชื่อมต่อ</div>
+            <div className="stat-label">งดใช้งาน</div>
             <div className="stat-value">{disconnectedCount} เครื่อง</div>
-            <div className="stat-foot">{disconnectedCount > 0 ? 'ตรวจสอบการเชื่อมต่อ' : 'ทุกเครื่องเชื่อมต่ออยู่'}</div>
+            <div className="stat-foot">{disconnectedCount > 0 ? 'เช่น เสีย / ส่งซ่อม' : 'ทุกเครื่องพร้อมใช้งาน'}</div>
           </div>
         </div>
         <div className="stat-card">
@@ -251,39 +238,61 @@ export default function Scales() {
           <div className="hero-left">
             <div className="hero-status">
               <span className="hero-dot"></span>
-              {d.status === 'on' ? 'เชื่อมต่อแล้ว' : 'ไม่ได้เชื่อมต่อ'} · อัปเดตล่าสุดเมื่อสักครู่
+              {!reader.supported
+                ? 'เบราว์เซอร์นี้เชื่อมเครื่องชั่งโดยตรงไม่ได้ — เปิดหน้านี้ด้วย Chrome หรือ Edge บนคอมที่เสียบสายเครื่องชั่ง (ผ่าน localhost หรือ https)'
+                : reader.status === 'connected'
+                  ? reader.reading
+                    ? reader.reading.stable
+                      ? 'เชื่อมต่อแล้ว · น้ำหนักนิ่ง'
+                      : 'เชื่อมต่อแล้ว · น้ำหนักยังไม่นิ่ง'
+                    : 'เชื่อมต่อแล้ว · รอข้อมูลจากเครื่องชั่ง (ตั้งเครื่องชั่งเป็นโหมดส่งค่าต่อเนื่อง)'
+                  : reader.status === 'connecting'
+                    ? 'กำลังเชื่อมต่อ...'
+                    : reader.error || 'ยังไม่ได้เชื่อมต่อเครื่องชั่งบนคอมเครื่องนี้'}
             </div>
             <div className="hero-device">
               {d.name} · <b>{d.model}</b> · พอร์ต {d.port}
             </div>
             <div className="hero-reading">
-              <span className="val">{(d.status === 'on' ? liveWeight : 0).toFixed(2)}</span>
+              <span className="val">{reader.netWeight.toFixed(2)}</span>
               <span className="unit">กิโลกรัม</span>
             </div>
-            <div className="hero-sub">ความละเอียด {d.res}</div>
+            <div className="hero-sub">
+              ความละเอียด {d.res}
+              {reader.tareOffset !== 0 && ` · หักค่าศูนย์ ${reader.tareOffset.toFixed(2)} กก.`}
+            </div>
           </div>
           <div className="hero-actions">
-            <button
-              type="button"
-              className="hero-btn primary"
-              onClick={simulate}
-              disabled={d.status !== 'on'}
-              title="เว็บเบราว์เซอร์เชื่อมต่อกับเครื่องชั่งจริงโดยตรงไม่ได้ ปุ่มนี้จึงจำลองค่าน้ำหนักไว้สำหรับทดสอบหน้าจอเท่านั้น"
-            >
-              <IconPlus />
-              วางของบนเครื่องชั่ง (จำลอง)
-            </button>
-            <button type="button" className="hero-btn" onClick={tare} disabled={d.status !== 'on'}>
+            {reader.status === 'connected' ? (
+              <button type="button" className="hero-btn" onClick={reader.disconnect}>
+                <IconX />
+                ตัดการเชื่อมต่อ
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="hero-btn primary"
+                onClick={reader.connect}
+                disabled={!reader.supported || reader.status === 'connecting'}
+                title="เลือกพอร์ต USB/COM ที่เสียบสายเครื่องชั่งไว้ — ครั้งต่อไปจะเชื่อมต่อให้อัตโนมัติ"
+              >
+                <IconPlus />
+                เชื่อมต่อเครื่องชั่ง
+              </button>
+            )}
+            <button type="button" className="hero-btn" onClick={tare} disabled={reader.status !== 'connected'}>
               <IconTare />
               ตั้งค่าศูนย์ (Tare)
             </button>
-            <button type="button" className="hero-btn" onClick={handleCalibrate}>
+            {reader.tareOffset !== 0 && (
+              <button type="button" className="hero-btn" onClick={reader.clearTare}>
+                <IconX />
+                ล้างค่าศูนย์
+              </button>
+            )}
+            <button type="button" className="hero-btn" onClick={handleCalibrate} disabled={reader.status !== 'connected'}>
               <IconRefresh />
-              สอบเทียบเครื่องชั่ง
-            </button>
-            <button type="button" className="hero-btn" onClick={() => toggleConnected(selectedId)}>
-              <IconCheck />
-              {d.status === 'on' ? 'ตัดการเชื่อมต่อ' : 'เชื่อมต่อ'}
+              สอบเทียบกับตุ้มมาตรฐาน
             </button>
           </div>
         </div>
@@ -335,14 +344,14 @@ export default function Scales() {
                       <button
                         type="button"
                         className={`badge badge-btn ${dev.status === 'on' ? 'badge-green' : 'badge-neutral'}`}
-                        title="กดเพื่อสลับสถานะการเชื่อมต่อ"
+                        title="กดเพื่อสลับสถานะพร้อมใช้งาน / งดใช้งาน"
                         onClick={(e) => {
                           e.stopPropagation();
                           toggleConnected(id);
                         }}
                       >
                         {dev.status === 'on' ? <IconCheck /> : null}
-                        {dev.status === 'on' ? 'เชื่อมต่อ' : 'ไม่ได้เชื่อมต่อ'}
+                        {dev.status === 'on' ? 'พร้อมใช้งาน' : 'งดใช้งาน'}
                       </button>
                     </td>
                     <td>
@@ -443,6 +452,32 @@ export default function Scales() {
                 </div>
               </div>
 
+              <div className="field-row">
+                <div className="field" style={{ flex: 1 }}>
+                  <label>ความเร็วสื่อสาร (Baud rate) — คอมนี้</label>
+                  <select
+                    className="input-plain"
+                    value={reader.serialSettings.baudRate}
+                    onChange={(e) => reader.setSerialSettings((prev) => ({ ...prev, baudRate: Number(e.target.value) }))}
+                  >
+                    {BAUD_RATES.map((b) => (
+                      <option key={b} value={b}>
+                        {b}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field" style={{ flex: 1 }}>
+                  <label>คำสั่งขอค่า (ถ้าเครื่องต้องการ)</label>
+                  <input
+                    className="input-plain"
+                    placeholder="เว้นว่าง = ส่งค่าต่อเนื่อง"
+                    value={reader.serialSettings.pollCommand}
+                    onChange={(e) => reader.setSerialSettings((prev) => ({ ...prev, pollCommand: e.target.value }))}
+                  />
+                </div>
+              </div>
+
               <div className="toggle-row">
                 <div>
                   <div className="lbl">ใช้เป็นเครื่องชั่งหลัก</div>
@@ -456,9 +491,9 @@ export default function Scales() {
                   <IconCheck />
                   บันทึกการตั้งค่า
                 </button>
-                <button type="button" className="btn btn-ghost btn-block" onClick={handleCalibrate}>
+                <button type="button" className="btn btn-ghost btn-block" onClick={handleCalibrate} disabled={reader.status !== 'connected'}>
                   <IconRefresh />
-                  สอบเทียบเครื่องนี้
+                  สอบเทียบกับตุ้มมาตรฐาน
                 </button>
                 <button type="button" className="btn btn-danger-ghost btn-block" onClick={() => handleRemove()}>
                   <IconScale />
@@ -474,7 +509,7 @@ export default function Scales() {
               สรุปเครื่องชั่ง
             </div>
             <div className="mini-stat-row">
-              <span>เชื่อมต่ออยู่</span>
+              <span>พร้อมใช้งาน</span>
               <span className="n">{connectedCount} / {order.length} เครื่อง</span>
             </div>
             <div className="mini-stat-row">
