@@ -423,6 +423,14 @@ export default function ScrapPurchase() {
     setBanner({ type: 'success', text: 'บันทึกฉบับร่างเรียบร้อยแล้ว — ครั้งถัดไปที่เปิดหน้านี้จะมีให้ตรวจสอบก่อนนำเข้าฟอร์ม' });
   }
 
+  // Items whose name (or the note) matches a word on the shop's watch-list — likely stolen
+  // public/utility property. Shown as a warning while filling in, and confirmed on submit.
+  const watchWords = (settings.watchKeywords || '')
+    .split(/\r?\n|,/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+  const watchHits = watchWords.filter((w) => rows.some((r) => (r.name || '').includes(w)) || note.includes(w));
+
   async function handleSubmit() {
     if (rows.length === 0 || totalWeight <= 0) {
       setBanner({ type: 'error', text: 'กรุณาเพิ่มรายการสินค้าและระบุน้ำหนักก่อนบันทึก' });
@@ -437,6 +445,14 @@ export default function ScrapPurchase() {
           ? `${selectedCustomer.name} ยังไม่มีเลขบัตรประชาชนในระบบ — แก้ไขข้อมูลลูกค้าก่อน (ร้านตั้งค่าให้บังคับระบุผู้ขาย)`
           : 'ร้านตั้งค่าให้บังคับระบุผู้ขายทุกครั้ง — กรุณาเลือกหรือเพิ่มลูกค้าพร้อมเลขบัตรประชาชนก่อนบันทึก',
       });
+      return;
+    }
+    if (
+      watchHits.length > 0 &&
+      !window.confirm(
+        `รายการนี้ตรงกับของต้องสงสัย: ${watchHits.join(', ')}\n\nอาจเป็นทรัพย์สินสาธารณะหรือของที่ถูกขโมย — ยืนยันว่าตรวจสอบที่มาของสินค้า${selectedCustomer ? '' : 'และควรบันทึกข้อมูลผู้ขาย'}แล้ว?`
+      )
+    ) {
       return;
     }
     // Otherwise no customer selected genuinely means a walk-in sale, per the placeholder text
@@ -1093,6 +1109,12 @@ export default function ScrapPurchase() {
                   retakeLabel="แนบรูปใหม่"
                   alt="สลิปโอนเงิน"
                 />
+              </div>
+            )}
+
+            {watchHits.length > 0 && (
+              <div className="page-banner banner-error" style={{ marginBottom: 10 }}>
+                ⚠ ตรงกับของต้องสงสัย: {watchHits.join(', ')} — ตรวจสอบที่มาของสินค้า{selectedCustomer ? '' : ' และบันทึกข้อมูลผู้ขาย (เลขบัตรประชาชน)'} ก่อนรับซื้อ
               </div>
             )}
 
