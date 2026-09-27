@@ -133,6 +133,11 @@ if (!receiptColumns.includes('vat_included')) {
 if (!receiptColumns.includes('vat_amount')) {
   db.exec('ALTER TABLE receipts ADD COLUMN vat_amount REAL NOT NULL DEFAULT 0');
 }
+// Optional photo of the goods actually bought — evidence of what came in, useful if a
+// purchase is ever questioned (e.g. by police checking for stolen property).
+if (!receiptColumns.includes('goods_photo')) {
+  db.exec("ALTER TABLE receipts ADD COLUMN goods_photo TEXT NOT NULL DEFAULT ''");
+}
 
 // Deliveries (outbound shipments to buyers, with the stock they carry out) used to live only
 // in each browser's own localStorage. `no` (the delivery number, e.g. "DO123456789") is the
