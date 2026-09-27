@@ -20,6 +20,10 @@ if (!JWT_SECRET) {
 }
 
 const app = express();
+// `tailscale serve` proxies remote requests in from this same machine, so without this every
+// remote user would look like 127.0.0.1 and share one login rate-limit bucket with the counter
+// PC. Only loopback is trusted to set X-Forwarded-For — a LAN device can't spoof its own IP.
+app.set('trust proxy', 'loopback');
 // Standard hardening headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy, HSTS,
 // etc.) at essentially no cost. contentSecurityPolicy is left off deliberately — the app relies
 // heavily on React's `style={{...}}` prop across every page, and helmet's default CSP would need
@@ -34,10 +38,17 @@ app.use(helmet({ contentSecurityPolicy: false }));
 // still couldn't call this API.
 const LAN_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})(:\d+)?$/;
+// Remote access goes through a private overlay network (Tailscale's `tailscale serve`), so its
+// origin is e.g. https://<machine>.<tailnet>.ts.net — listed exactly in server/.env rather than
+// hardcoded, since this repo is public and the tailnet name is the shop's own.
+const EXTRA_ORIGINS = (process.env.EXTRA_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || LAN_ORIGIN_RE.test(origin)) {
+      if (!origin || LAN_ORIGIN_RE.test(origin) || EXTRA_ORIGINS.includes(origin)) {
         return callback(null, true);
       }
       callback(new Error('Not allowed by CORS'));
