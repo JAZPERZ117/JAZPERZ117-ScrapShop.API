@@ -657,9 +657,23 @@ app.get('/api/receipts', requireAuth, (req, res) => {
   res.json({ receipts: rows.map(toApiReceipt) });
 });
 
+// Receipt numbers used to be the last 9 digits of the client's clock (e.g. RC653768031): unique
+// enough, but not sequential, so a gap or a missing receipt was impossible to spot. The server now
+// issues RC{BE year:2}{month:2}-{0001...}, restarting each month. Computed and inserted within one
+// synchronous request (node:sqlite), so two tills can't be handed the same number.
+function nextReceiptNo(dateISO) {
+  const [y, m] = dateISO.split('-').map(Number);
+  const prefix = `RC${String((y + 543) % 100).padStart(2, '0')}${String(m).padStart(2, '0')}-`;
+  const row = db
+    .prepare('SELECT MAX(CAST(substr(no, ?) AS INTEGER)) AS last FROM receipts WHERE no LIKE ?')
+    .get(prefix.length + 1, `${prefix}%`);
+  return prefix + String((row.last || 0) + 1).padStart(4, '0');
+}
+
 app.post('/api/receipts', requireAuth, requireMenu('purchase'), (req, res) => {
   const b = req.body || {};
-  if (!b.no) return res.status(400).json({ error: 'ไม่มีเลขที่ใบเสร็จ' });
+  const date = b.date || todayISO();
+  b.no = b.no || nextReceiptNo(date);
   if (db.prepare('SELECT no FROM receipts WHERE no = ?').get(b.no)) {
     return res.status(409).json({ error: `เลขที่ใบเสร็จ ${b.no} ถูกใช้แล้ว` });
   }
@@ -668,7 +682,7 @@ app.post('/api/receipts', requireAuth, requireMenu('purchase'), (req, res) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     b.no,
-    b.date || todayISO(),
+    date,
     b.time || '',
     b.cust || '',
     b.custId || null,
