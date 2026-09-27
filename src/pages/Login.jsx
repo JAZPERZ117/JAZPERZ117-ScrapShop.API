@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   IconScale,
   IconReceipt,
@@ -83,7 +83,9 @@ export default function Login() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsLoaded]);
   const [errors, setErrors] = useState({});
-  const [formError, setFormError] = useState('');
+  // Set by installSessionExpiryRedirect (lib/auth.js) when the server rejected an expired token.
+  const [searchParams] = useSearchParams();
+  const [formError, setFormError] = useState(() => (searchParams.get('expired') ? 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่อีกครั้ง' : ''));
   const [submitting, setSubmitting] = useState(false);
   const [showForgotHelp, setShowForgotHelp] = useState(false);
   const [showPinLogin, setShowPinLogin] = useState(false);
@@ -110,7 +112,7 @@ export default function Login() {
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, remember }),
       });
       const data = await res.json();
 
