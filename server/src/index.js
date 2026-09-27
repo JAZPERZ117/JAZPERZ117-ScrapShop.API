@@ -306,7 +306,7 @@ app.get('/api/customers', requireAuth, (req, res) => {
 });
 
 app.post('/api/customers', requireAuth, requireMenu('purchase', 'customers'), (req, res) => {
-  const { name, phone, idNumber, idExpiry, idPhoto } = req.body || {};
+  const { name, phone, idNumber, idExpiry, idPhoto, addr } = req.body || {};
   if (!name?.trim()) {
     return res.status(400).json({ error: 'กรุณากรอกชื่อลูกค้า' });
   }
@@ -314,9 +314,9 @@ app.post('/api/customers', requireAuth, requireMenu('purchase', 'customers'), (r
   const init = name.trim().replace('คุณ', '').trim().slice(0, 2) || '?';
   const since = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'short', year: 'numeric' }).format(new Date());
   db.prepare(
-    `INSERT INTO customers (id, name, phone, init, id_number, id_expiry, id_photo, since)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, name.trim(), (phone || '').trim(), init, (idNumber || '').trim(), idExpiry || '', idPhoto || '', since);
+    `INSERT INTO customers (id, name, phone, init, id_number, id_expiry, id_photo, since, addr)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, name.trim(), (phone || '').trim(), init, (idNumber || '').trim(), idExpiry || '', idPhoto || '', since, addr?.trim() || 'ยังไม่ได้บันทึกที่อยู่');
   const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
   res.status(201).json({ customer: toApiCustomer(row) });
 });
@@ -327,7 +327,7 @@ app.put('/api/customers/:id', requireAuth, requireMenu('customers'), (req, res) 
   const body = req.body || {};
   const nextName = body.name?.trim() || row.name;
   db.prepare(
-    `UPDATE customers SET name = ?, init = ?, phone = ?, id_number = ?, id_expiry = ?, id_photo = ?, tag = ? WHERE id = ?`
+    `UPDATE customers SET name = ?, init = ?, phone = ?, id_number = ?, id_expiry = ?, id_photo = ?, tag = ?, addr = ? WHERE id = ?`
   ).run(
     nextName,
     body.name?.trim() ? nextName.replace('คุณ', '').trim().slice(0, 2) || row.init : row.init,
@@ -336,6 +336,7 @@ app.put('/api/customers/:id', requireAuth, requireMenu('customers'), (req, res) 
     body.idExpiry !== undefined ? body.idExpiry : row.id_expiry,
     body.idPhoto !== undefined ? body.idPhoto : row.id_photo,
     body.tag !== undefined ? body.tag : row.tag,
+    body.addr !== undefined ? body.addr?.trim() || 'ยังไม่ได้บันทึกที่อยู่' : row.addr,
     row.id
   );
   res.json({ customer: toApiCustomer(db.prepare('SELECT * FROM customers WHERE id = ?').get(row.id)) });
@@ -1290,6 +1291,7 @@ function toApiSettings(row) {
     receiptFooter: row.receipt_footer,
     remember30: !!row.remember30,
     pinLogin: !!row.pin_login,
+    requireSeller: !!row.require_seller,
   };
 }
 
@@ -1306,7 +1308,7 @@ app.put('/api/settings', requireAuth, requireOwner, (req, res) => {
   const row = db.prepare("SELECT * FROM settings WHERE id = 'shop'").get();
   const b = req.body || {};
   db.prepare(
-    `UPDATE settings SET shop_name = ?, tax_id = ?, address = ?, phone = ?, hours = ?, receipt_footer = ?, remember30 = ?, pin_login = ? WHERE id = 'shop'`
+    `UPDATE settings SET shop_name = ?, tax_id = ?, address = ?, phone = ?, hours = ?, receipt_footer = ?, remember30 = ?, pin_login = ?, require_seller = ? WHERE id = 'shop'`
   ).run(
     b.shopName !== undefined ? b.shopName : row.shop_name,
     b.taxId !== undefined ? b.taxId : row.tax_id,
@@ -1315,7 +1317,8 @@ app.put('/api/settings', requireAuth, requireOwner, (req, res) => {
     b.hours !== undefined ? b.hours : row.hours,
     b.receiptFooter !== undefined ? b.receiptFooter : row.receipt_footer,
     b.remember30 !== undefined ? (b.remember30 ? 1 : 0) : row.remember30,
-    b.pinLogin !== undefined ? (b.pinLogin ? 1 : 0) : row.pin_login
+    b.pinLogin !== undefined ? (b.pinLogin ? 1 : 0) : row.pin_login,
+    b.requireSeller !== undefined ? (b.requireSeller ? 1 : 0) : row.require_seller
   );
   res.json({ settings: toApiSettings(db.prepare("SELECT * FROM settings WHERE id = 'shop'").get()) });
 });

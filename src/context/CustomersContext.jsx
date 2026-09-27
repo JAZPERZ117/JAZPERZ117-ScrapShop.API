@@ -78,11 +78,11 @@ export function CustomersProvider({ children }) {
     return out;
   }, [customersRaw]);
 
-  async function addCustomer({ name, phone, idNumber, idExpiry, idPhoto }) {
+  async function addCustomer({ name, phone, idNumber, idExpiry, idPhoto, addr }) {
     const res = await fetch('/api/customers', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ name, phone, idNumber, idExpiry, idPhoto }),
+      body: JSON.stringify({ name, phone, idNumber, idExpiry, idPhoto, addr }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'เพิ่มลูกค้าไม่สำเร็จ');

@@ -170,6 +170,20 @@ export default function Settings() {
 
           <div className="card card-pad">
             <div className="card-title" style={{ marginBottom: 14 }}>
+              <IconShop />
+              บัญชีรับซื้อของเก่า
+            </div>
+            <div className="toggle-row">
+              <div>
+                <div className="lbl">บังคับระบุผู้ขายทุกครั้ง</div>
+                <div className="sub">ห้ามบันทึกแบบลูกค้าขาจร — ต้องเลือกผู้ขายที่มีเลขบัตรประชาชน เพื่อให้บัญชีรับซื้อครบถ้วน</div>
+              </div>
+              <button type="button" className={`switch${form.requireSeller ? ' on' : ''}`} onClick={() => setField('requireSeller', !form.requireSeller)}></button>
+            </div>
+          </div>
+
+          <div className="card card-pad">
+            <div className="card-title" style={{ marginBottom: 14 }}>
               <IconInfo />
               เกี่ยวกับระบบ
             </div>

@@ -320,6 +320,14 @@ db.exec(`
   );
 `);
 
+// Added after the settings table shipped — when on, every purchase must name a seller with an
+// ID card number on file (for the บัญชีรับซื้อของเก่า register), instead of allowing anonymous
+// "ลูกค้าขาจร" walk-ins. Off by default so turning this on is the owner's decision.
+const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);
+if (!settingsColumns.includes('require_seller')) {
+  db.exec('ALTER TABLE settings ADD COLUMN require_seller INTEGER NOT NULL DEFAULT 0');
+}
+
 // Running costs of the shop itself (electricity, fuel, rent, repairs...) — separate from buying
 // scrap in (receipts) and from wages (pay_history), and deducted alongside both when reports
 // compute net profit and "actual cost" taxable income.

@@ -127,6 +127,7 @@ export default function ScrapPurchase() {
   const [newCustIdNumber, setNewCustIdNumber] = useState('');
   const [newCustIdExpiry, setNewCustIdExpiry] = useState('');
   const [newCustIdPhoto, setNewCustIdPhoto] = useState('');
+  const [newCustAddr, setNewCustAddr] = useState('');
 
   const [rows, setRows] = useState([]);
 
@@ -336,8 +337,10 @@ export default function ScrapPurchase() {
         idNumber: newCustIdNumber.trim(),
         idExpiry: newCustIdExpiry,
         idPhoto: newCustIdPhoto,
+        addr: newCustAddr.trim(),
       });
       setSelectedCustomer(created);
+      setNewCustAddr('');
       setNewCustName('');
       setNewCustPhone('');
       setNewCustIdNumber('');
@@ -423,9 +426,19 @@ export default function ScrapPurchase() {
       setBanner({ type: 'error', text: 'กรุณาเพิ่มรายการสินค้าและระบุน้ำหนักก่อนบันทึก' });
       return;
     }
-    // No customer selected genuinely means a walk-in sale, per the placeholder text right
-    // above the customer search box ("รายการนี้จะบันทึกเป็นลูกค้าขาจร") — this used to
-    // contradict that by blocking submission outright instead of actually recording one.
+    // Settings → "บังคับระบุผู้ขายทุกครั้ง": the purchase register needs a named seller with an
+    // ID number on every line, so an anonymous walk-in is refused while that's on.
+    if (settings.requireSeller && !selectedCustomer?.idNumber) {
+      setBanner({
+        type: 'error',
+        text: selectedCustomer
+          ? `${selectedCustomer.name} ยังไม่มีเลขบัตรประชาชนในระบบ — แก้ไขข้อมูลลูกค้าก่อน (ร้านตั้งค่าให้บังคับระบุผู้ขาย)`
+          : 'ร้านตั้งค่าให้บังคับระบุผู้ขายทุกครั้ง — กรุณาเลือกหรือเพิ่มลูกค้าพร้อมเลขบัตรประชาชนก่อนบันทึก',
+      });
+      return;
+    }
+    // Otherwise no customer selected genuinely means a walk-in sale, per the placeholder text
+    // above the customer search box.
     const cust = selectedCustomer || WALK_IN_CUSTOMER;
     const receiptNo = 'RC' + Date.now().toString().slice(-9);
     const user = getStoredAuth();
@@ -728,6 +741,7 @@ export default function ScrapPurchase() {
                   value={newCustIdNumber}
                   onChange={(e) => setNewCustIdNumber(e.target.value)}
                 />
+                <input type="text" placeholder="ที่อยู่ตามบัตรประชาชน (ไม่บังคับ)" value={newCustAddr} onChange={(e) => setNewCustAddr(e.target.value)} />
                 <div className="field">
                   <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>วันหมดอายุบัตรประชาชน</label>
                   <input type="date" className="input-plain" value={newCustIdExpiry} onChange={(e) => setNewCustIdExpiry(e.target.value)} />
@@ -753,7 +767,11 @@ export default function ScrapPurchase() {
                 </div>
               </div>
             ) : (
-              <div className="cust-empty">ยังไม่ได้เลือกลูกค้า — รายการนี้จะบันทึกเป็นลูกค้าขาจร</div>
+              <div className="cust-empty">
+                {settings.requireSeller
+                  ? 'ยังไม่ได้เลือกลูกค้า — ร้านตั้งค่าให้ต้องระบุผู้ขายพร้อมเลขบัตรประชาชนทุกครั้ง'
+                  : 'ยังไม่ได้เลือกลูกค้า — รายการนี้จะบันทึกเป็นลูกค้าขาจร'}
+              </div>
             )}
           </div>
 
