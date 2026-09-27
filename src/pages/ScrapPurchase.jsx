@@ -83,10 +83,6 @@ function makeRow(category) {
   };
 }
 
-function makeDraftNo() {
-  return 'RC' + Date.now().toString().slice(-9);
-}
-
 export default function ScrapPurchase() {
   const navigate = useNavigate();
   const { customers, order: customerOrder, addCustomer, recordPurchase } = useCustomers();
@@ -114,7 +110,6 @@ export default function ScrapPurchase() {
         .map((p) => ({ name: p.name, price: p.price, icon: p.Icon, bg: p.bg, fg: p.fg })),
     [products, productOrder, activeCategoryNames]
   );
-  const [draftNo, setDraftNo] = useState(makeDraftNo);
   const [custQuery, setCustQuery] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
@@ -391,7 +386,6 @@ export default function ScrapPurchase() {
     setPayMethod('cash');
     setTransferSlipPhoto('');
     setIncludeVat(false);
-    setDraftNo(makeDraftNo());
     setDraft(null);
   }
 
@@ -456,7 +450,6 @@ export default function ScrapPurchase() {
     // Otherwise no customer selected genuinely means a walk-in sale, per the placeholder text
     // above the customer search box.
     const cust = selectedCustomer || WALK_IN_CUSTOMER;
-    const receiptNo = 'RC' + Date.now().toString().slice(-9);
     const user = getStoredAuth();
     const timeStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
     // Built ahead of the actual save so the try block below can show it immediately once
@@ -464,7 +457,7 @@ export default function ScrapPurchase() {
     // a save that can still fail would pop up a "receipt" (printable, reprintable) for a sale
     // that was never actually recorded, right alongside the error banner from the catch below.
     const snapshot = {
-      no: receiptNo,
+      no: '',
       time: timeStr,
       date: todayThaiDate(),
       customerName: cust.name,
@@ -489,9 +482,10 @@ export default function ScrapPurchase() {
       vatIncluded: includeVat,
       vatAmount,
     };
+    // The server issues the sequential receipt number and hands it back here.
+    let receiptNo;
     try {
-      await addReceipt({
-        no: receiptNo,
+      const saved = await addReceipt({
         time: timeStr,
         cust: cust.name,
         // Receipts previously only stored the customer's name — voiding one had no reliable
@@ -547,11 +541,12 @@ export default function ScrapPurchase() {
             .map((r) => ({ id: r.deductionReasonId, amount: rowDeductionWeight(r) })),
         ],
       });
+      receiptNo = saved.no;
     } catch (err) {
       setBanner({ type: 'error', text: err.message });
       return;
     }
-    setPrintSnapshot(snapshot);
+    setPrintSnapshot({ ...snapshot, no: receiptNo });
     // Record real usage against each deduction reason actually applied on this receipt —
     // both the overall reason and any per-row reasons — so the "ใช้แล้ว N ครั้ง" / ยอดหักรวม
     // figures on the หักน้ำหนัก/เหตุผล page reflect real weight-deducted activity, not frozen
@@ -594,7 +589,7 @@ export default function ScrapPurchase() {
             รับซื้อสินค้า <span>›</span> <b>เริ่มรับซื้อ</b>
           </div>
           <h1 className="page-title">
-            รับซื้อของเก่า <span className="receipt-tag">ฉบับร่าง · {draftNo}</span>
+            รับซื้อของเก่า <span className="receipt-tag">ฉบับร่าง · ออกเลขที่เมื่อบันทึก</span>
           </h1>
         </div>
         <div className="head-actions">
