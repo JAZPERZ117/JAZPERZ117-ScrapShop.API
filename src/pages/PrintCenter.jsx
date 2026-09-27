@@ -12,6 +12,7 @@ import {
   IconVoucher,
   IconClockHistory,
   IconDownload,
+  IconArchive,
 } from '../icons.jsx';
 import { usePersistentState } from '../lib/persist.js';
 import { usePrinters } from '../context/PrintersContext.jsx';
@@ -101,10 +102,27 @@ const DOCS = {
   pricetag: { name: 'ป้ายราคาสินค้า', bg: 'var(--plum-bg)', fg: 'var(--plum)', Icon: IconTag, desc: 'พิมพ์ป้ายราคารับซื้อล่าสุดติดหน้าร้าน' },
   idcard: { name: 'บัตรสมาชิกลูกค้า', bg: 'var(--rose-bg)', fg: 'var(--rose)', Icon: IconIdCard, desc: 'พิมพ์บัตรสมาชิกให้ลูกค้าที่มีอยู่ในระบบ' },
   tax: { name: 'เอกสารภาษี ภงด.90/94', bg: 'var(--bg)', fg: 'var(--ink-500)', Icon: IconTax, desc: 'พิมพ์แบบสรุปรายได้สำหรับยื่นภาษี' },
+  register: {
+    name: 'บัญชีรับซื้อของเก่า',
+    bg: 'var(--amber-bg)',
+    fg: 'var(--amber)',
+    Icon: IconArchive,
+    desc: 'ทะเบียนการรับซื้อรายเดือน: ผู้ขาย เลขบัตร ที่อยู่ รายการ น้ำหนัก ราคา — สำหรับแสดงเจ้าหน้าที่',
+  },
   voucher: { name: 'ใบสำคัญจ่าย', bg: 'var(--green-100)', fg: 'var(--green-700)', Icon: IconVoucher, desc: 'พิมพ์เอกสารยืนยันการจ่ายเงินจากประวัติจ่ายจริง' },
 };
 
-const ORDER = ['receipt', 'payslip', 'daily', 'monthly', 'pricetag', 'idcard', 'tax', 'voucher'];
+const ORDER = ['receipt', 'payslip', 'daily', 'monthly', 'register', 'pricetag', 'idcard', 'tax', 'voucher'];
+
+// Item net weight: the clean number stored on receipts made after it was added, else parsed back
+// out of the display string (same fallback as Receipts.jsx).
+function itemNetWeight(it) {
+  if (typeof it.netWeight === 'number') return it.netWeight;
+  const w = it.w || '';
+  const afterEquals = w.includes('=') ? w.split('=')[1] : w;
+  const match = afterEquals.match(/([\d,]+\.?\d*)\s*กก\./);
+  return match ? parseFloat(match[1].replace(/,/g, '')) || 0 : 0;
+}
 
 export default function PrintCenter() {
   const [selectedId, setSelectedId] = useState('receipt');
@@ -147,6 +165,12 @@ export default function PrintCenter() {
   const [selectedCustomerId, setSelectedCustomerId] = useState(customerOrder[0]);
   const [taxForm, setTaxForm] = useState('90');
   const [taxExpenseMethod, setTaxExpenseMethod] = useState('actual');
+  const [registerMonth, setRegisterMonth] = useState(() => todayISO().slice(0, 7));
+  // Chronological (oldest first), like a paper register — receipt order is newest first.
+  const registerIds = receiptOrder
+    .filter((id) => receipts[id].status !== 'void' && (receipts[id].date || '').startsWith(registerMonth))
+    .slice()
+    .reverse();
   // Narrows the payslip picker to payments made on a chosen date, keeping each option's
   // real index into `payHistory` (what selectedPayIdx actually addresses) rather than a
   // filtered-array position, so picking a narrowed option still resolves the right record.
@@ -205,6 +229,8 @@ export default function PrintCenter() {
         return customerOrder.length > 0;
       case 'pricetag':
         return pricetagList.length > 0;
+      case 'register':
+        return registerIds.length > 0;
       default:
         return true;
     }
@@ -325,6 +351,19 @@ export default function PrintCenter() {
           <div className="field">
             <label>เดือน</label>
             <input className="input-plain" value={THIS_MONTH_THAI_LONG} disabled />
+          </div>
+        );
+      case 'register':
+        return (
+          <div className="field">
+            <label>เดือน</label>
+            <input
+              type="month"
+              className="input-plain"
+              value={registerMonth}
+              max={todayISO().slice(0, 7)}
+              onChange={(e) => e.target.value && setRegisterMonth(e.target.value)}
+            />
           </div>
         );
       case 'pricetag':
@@ -921,7 +960,86 @@ export default function PrintCenter() {
     );
   }
 
+  // บัญชีรับซื้อของเก่า — one line per (non-void) purchase in the month, with the seller's identity
+  // pulled from the customer record the receipt points at. Walk-in receipts have no identity to
+  // show, so they're flagged rather than silently left blank.
+  function renderRegisterDoc() {
+    if (registerIds.length === 0) return null;
+    const [y, m] = registerMonth.split('-').map(Number);
+    const monthLabel = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'long', year: 'numeric' }).format(new Date(y, m - 1, 1));
+    let totalWeight = 0;
+    let totalAmount = 0;
+    let missingIdentity = 0;
+    const lines = registerIds.map((id, i) => {
+      const r = receipts[id];
+      const c = r.custId ? customers[r.custId] : null;
+      const weight = parseWeight(r.weight);
+      const amount = parseMoney(r.total);
+      totalWeight += weight;
+      totalAmount += amount;
+      if (!c?.idNumber) missingIdentity += 1;
+      const [ry, rm, rd] = (r.date || '').split('-').map(Number);
+      return {
+        key: id,
+        n: i + 1,
+        when: `${rd}/${rm}/${ry + 543} ${r.time || ''}`,
+        no: r.no,
+        seller: c?.name || r.cust || 'ลูกค้าขาจร',
+        idNumber: c?.idNumber || '— ไม่มีข้อมูล —',
+        contact: [c?.addr && c.addr !== 'ยังไม่ได้บันทึกที่อยู่' ? c.addr : '', c?.phone || ''].filter(Boolean).join(' · ') || '—',
+        items: (r.items || []).map((it) => `${it.n} ${itemNetWeight(it).toFixed(2)} กก.`).join(', '),
+        amount,
+      };
+    });
+    return (
+      <div className="a4-doc" style={{ fontSize: 11 }}>
+        {renderA4Top(`บัญชีรับซื้อของเก่า · ${monthLabel}`)}
+        <hr className="a4-doc-divider" />
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>วันที่ / เวลา</th>
+              <th>เลขที่</th>
+              <th>ผู้ขาย</th>
+              <th>เลขบัตรประชาชน</th>
+              <th>ที่อยู่ / โทร</th>
+              <th>รายการสิ่งของ (น้ำหนักสุทธิ)</th>
+              <th className="num">จำนวนเงิน</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l) => (
+              <tr key={l.key}>
+                <td>{l.n}</td>
+                <td>{l.when}</td>
+                <td>{l.no}</td>
+                <td>{l.seller}</td>
+                <td>{l.idNumber}</td>
+                <td>{l.contact}</td>
+                <td>{l.items}</td>
+                <td className="num">{money(l.amount)}</td>
+              </tr>
+            ))}
+            <tr className="a4-doc-total-row">
+              <td colSpan={6}>รวม {lines.length} รายการ · น้ำหนัก {totalWeight.toLocaleString('th-TH')} กก.</td>
+              <td></td>
+              <td className="num">{money(totalAmount)}</td>
+            </tr>
+          </tbody>
+        </table>
+        {missingIdentity > 0 && (
+          <div className="a4-doc-foot" style={{ color: 'var(--rose)' }}>
+            มี {missingIdentity} รายการที่ไม่มีเลขบัตรประชาชนผู้ขาย — เปิด "บังคับระบุผู้ขายทุกครั้ง" ในหน้าตั้งค่าเพื่อป้องกันในอนาคต
+          </div>
+        )}
+        <div className="a4-doc-foot">พิมพ์เมื่อ {nowStr()} · ลงชื่อผู้ประกอบการ ...................................</div>
+      </div>
+    );
+  }
+
   const DOC_RENDERERS = {
+    register: renderRegisterDoc,
     receipt: renderReceiptDoc,
     payslip: renderPayslipDoc,
     voucher: renderVoucherDoc,

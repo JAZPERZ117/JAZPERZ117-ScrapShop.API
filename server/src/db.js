@@ -133,6 +133,11 @@ if (!receiptColumns.includes('vat_included')) {
 if (!receiptColumns.includes('vat_amount')) {
   db.exec('ALTER TABLE receipts ADD COLUMN vat_amount REAL NOT NULL DEFAULT 0');
 }
+// Optional photo of the goods actually bought — evidence of what came in, useful if a
+// purchase is ever questioned (e.g. by police checking for stolen property).
+if (!receiptColumns.includes('goods_photo')) {
+  db.exec("ALTER TABLE receipts ADD COLUMN goods_photo TEXT NOT NULL DEFAULT ''");
+}
 
 // Deliveries (outbound shipments to buyers, with the stock they carry out) used to live only
 // in each browser's own localStorage. `no` (the delivery number, e.g. "DO123456789") is the
@@ -320,6 +325,20 @@ db.exec(`
   );
 `);
 
+// Added after the settings table shipped — when on, every purchase must name a seller with an
+// ID card number on file (for the บัญชีรับซื้อของเก่า register), instead of allowing anonymous
+// "ลูกค้าขาจร" walk-ins. Off by default so turning this on is the owner's decision.
+const settingsColumns = db.prepare('PRAGMA table_info(settings)').all().map((c) => c.name);
+if (!settingsColumns.includes('require_seller')) {
+  db.exec('ALTER TABLE settings ADD COLUMN require_seller INTEGER NOT NULL DEFAULT 0');
+}
+// Words that suggest stolen public/utility property (manhole covers, power cable, road signs...).
+// The purchase screen warns and asks for confirmation when an item name or note contains one.
+// One per line; editable in Settings.
+if (!settingsColumns.includes('watch_keywords')) {
+  db.exec("ALTER TABLE settings ADD COLUMN watch_keywords TEXT NOT NULL DEFAULT 'ฝาท่อ\nตะแกรงท่อ\nสายไฟการไฟฟ้า\nสายไฟแรงสูง\nหม้อแปลง\nมิเตอร์ไฟ\nมิเตอร์น้ำ\nป้ายจราจร\nราวสะพาน\nราวกันตก\nรางรถไฟ\nสายโทรศัพท์\nสายเคเบิล\nประตูรั้ว\nระฆัง'");
+}
+
 // Running costs of the shop itself (electricity, fuel, rent, repairs...) — separate from buying
 // scrap in (receipts) and from wages (pay_history), and deducted alongside both when reports
 // compute net profit and "actual cost" taxable income.
@@ -330,6 +349,37 @@ db.exec(`
     category TEXT NOT NULL,
     amount REAL NOT NULL,
     pay_method TEXT NOT NULL DEFAULT 'cash',
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// One row per day: the cash float put in the drawer when the shop opens and the cash actually
+// counted at close. The expected amount isn't stored — it's derived from that day's cash
+// in/out (see DailySummary.jsx), so it stays right even if a receipt is voided afterward.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cash_counts (
+    date TEXT PRIMARY KEY,
+    opening_float REAL NOT NULL DEFAULT 0,
+    counted_cash REAL,
+    note TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// Every manual stock correction (a physical count, moisture loss, theft, a typo fix) with who,
+// when, before/after and why — stock used to be a free-text field anyone could overwrite with
+// no trace.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS stock_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    before_kg REAL NOT NULL,
+    after_kg REAL NOT NULL,
+    reason TEXT NOT NULL,
     note TEXT NOT NULL DEFAULT '',
     created_by TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))

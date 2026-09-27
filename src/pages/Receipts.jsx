@@ -702,6 +702,18 @@ export default function Receipts() {
                 </div>
               </div>
 
+            {selected.goodsPhoto && (
+              <div className="slip-photo-view">
+                <span className="slip-photo-label">รูปสินค้าที่รับซื้อ</span>
+                <img
+                  src={selected.goodsPhoto}
+                  alt="รูปสินค้าที่รับซื้อ"
+                  onClick={() => window.open(selected.goodsPhoto, '_blank')}
+                  title="กดเพื่อดูขนาดเต็ม"
+                />
+              </div>
+            )}
+
             {selected.slipPhoto && (
               // Shown here, not inside .paper above — this is the shop's own proof-of-payment
               // record, not something that belongs on the customer's printed copy of the receipt.

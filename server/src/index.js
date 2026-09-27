@@ -306,7 +306,7 @@ app.get('/api/customers', requireAuth, (req, res) => {
 });
 
 app.post('/api/customers', requireAuth, requireMenu('purchase', 'customers'), (req, res) => {
-  const { name, phone, idNumber, idExpiry, idPhoto } = req.body || {};
+  const { name, phone, idNumber, idExpiry, idPhoto, addr } = req.body || {};
   if (!name?.trim()) {
     return res.status(400).json({ error: 'กรุณากรอกชื่อลูกค้า' });
   }
@@ -314,9 +314,9 @@ app.post('/api/customers', requireAuth, requireMenu('purchase', 'customers'), (r
   const init = name.trim().replace('คุณ', '').trim().slice(0, 2) || '?';
   const since = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { month: 'short', year: 'numeric' }).format(new Date());
   db.prepare(
-    `INSERT INTO customers (id, name, phone, init, id_number, id_expiry, id_photo, since)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, name.trim(), (phone || '').trim(), init, (idNumber || '').trim(), idExpiry || '', idPhoto || '', since);
+    `INSERT INTO customers (id, name, phone, init, id_number, id_expiry, id_photo, since, addr)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, name.trim(), (phone || '').trim(), init, (idNumber || '').trim(), idExpiry || '', idPhoto || '', since, addr?.trim() || 'ยังไม่ได้บันทึกที่อยู่');
   const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
   res.status(201).json({ customer: toApiCustomer(row) });
 });
@@ -327,7 +327,7 @@ app.put('/api/customers/:id', requireAuth, requireMenu('customers'), (req, res) 
   const body = req.body || {};
   const nextName = body.name?.trim() || row.name;
   db.prepare(
-    `UPDATE customers SET name = ?, init = ?, phone = ?, id_number = ?, id_expiry = ?, id_photo = ?, tag = ? WHERE id = ?`
+    `UPDATE customers SET name = ?, init = ?, phone = ?, id_number = ?, id_expiry = ?, id_photo = ?, tag = ?, addr = ? WHERE id = ?`
   ).run(
     nextName,
     body.name?.trim() ? nextName.replace('คุณ', '').trim().slice(0, 2) || row.init : row.init,
@@ -336,6 +336,7 @@ app.put('/api/customers/:id', requireAuth, requireMenu('customers'), (req, res) 
     body.idExpiry !== undefined ? body.idExpiry : row.id_expiry,
     body.idPhoto !== undefined ? body.idPhoto : row.id_photo,
     body.tag !== undefined ? body.tag : row.tag,
+    body.addr !== undefined ? body.addr?.trim() || 'ยังไม่ได้บันทึกที่อยู่' : row.addr,
     row.id
   );
   res.json({ customer: toApiCustomer(db.prepare('SELECT * FROM customers WHERE id = ?').get(row.id)) });
@@ -464,13 +465,50 @@ app.put('/api/products/:id', requireAuth, requireMenu('products'), (req, res) =>
   const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
   const body = req.body || {};
-  db.prepare('UPDATE products SET name = ?, cat = ?, stock = ?, active = ? WHERE id = ?').run(
-    body.name !== undefined ? body.name.trim() || row.name : row.name,
+  // Stock is deliberately NOT editable here any more — manual corrections go through
+  // POST /api/products/:id/adjust-stock below so each one is logged with a reason.
+  db.prepare('UPDATE products SET name = ?, cat = ?, active = ? WHERE id = ?').run(
+    body.name !== undefined ? body.name?.trim() || row.name : row.name,
     body.cat !== undefined ? body.cat : row.cat,
-    body.stock !== undefined ? body.stock : row.stock,
     body.active !== undefined ? (body.active ? 1 : 0) : row.active,
     row.id
   );
+  res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
+});
+
+function toApiStockAdjustment(row) {
+  return {
+    id: row.id,
+    productId: row.product_id,
+    productName: row.product_name,
+    beforeKg: row.before_kg,
+    afterKg: row.after_kg,
+    reason: row.reason,
+    note: row.note,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+app.get('/api/stock-adjustments', requireAuth, (req, res) => {
+  const rows = req.query.productId
+    ? db.prepare('SELECT * FROM stock_adjustments WHERE product_id = ? ORDER BY id DESC LIMIT 50').all(String(req.query.productId))
+    : db.prepare('SELECT * FROM stock_adjustments ORDER BY id DESC LIMIT 200').all();
+  res.json({ adjustments: rows.map(toApiStockAdjustment) });
+});
+
+app.post('/api/products/:id/adjust-stock', requireAuth, requireMenu('products'), (req, res) => {
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
+  const b = req.body || {};
+  const afterKg = Number(b.newStockKg);
+  if (!(afterKg >= 0) || !Number.isFinite(afterKg)) return res.status(400).json({ error: 'กรุณากรอกสต็อกใหม่เป็นตัวเลข 0 ขึ้นไป' });
+  if (!String(b.reason || '').trim()) return res.status(400).json({ error: 'กรุณาเลือกเหตุผลในการปรับสต็อก' });
+  const beforeKg = parseFloat(String(row.stock).replace(/[^\d.]/g, '')) || 0;
+  db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(`${afterKg.toFixed(2)} กก.`, row.id);
+  db.prepare(
+    'INSERT INTO stock_adjustments (product_id, product_name, before_kg, after_kg, reason, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(row.id, row.name, beforeKg, afterKg, String(b.reason).trim(), String(b.note || '').trim(), req.authUser.username || '');
   res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
 });
 
@@ -603,6 +641,7 @@ function toApiReceipt(row) {
     deductionUsage: JSON.parse(row.deduction_usage || '[]'),
     voidedAt: row.voided_at,
     slipPhoto: row.slip_photo || '',
+    goodsPhoto: row.goods_photo || '',
     vatIncluded: !!row.vat_included,
     vatAmount: row.vat_amount || 0,
   };
@@ -618,18 +657,32 @@ app.get('/api/receipts', requireAuth, (req, res) => {
   res.json({ receipts: rows.map(toApiReceipt) });
 });
 
+// Receipt numbers used to be the last 9 digits of the client's clock (e.g. RC653768031): unique
+// enough, but not sequential, so a gap or a missing receipt was impossible to spot. The server now
+// issues RC{BE year:2}{month:2}-{0001...}, restarting each month. Computed and inserted within one
+// synchronous request (node:sqlite), so two tills can't be handed the same number.
+function nextReceiptNo(dateISO) {
+  const [y, m] = dateISO.split('-').map(Number);
+  const prefix = `RC${String((y + 543) % 100).padStart(2, '0')}${String(m).padStart(2, '0')}-`;
+  const row = db
+    .prepare('SELECT MAX(CAST(substr(no, ?) AS INTEGER)) AS last FROM receipts WHERE no LIKE ?')
+    .get(prefix.length + 1, `${prefix}%`);
+  return prefix + String((row.last || 0) + 1).padStart(4, '0');
+}
+
 app.post('/api/receipts', requireAuth, requireMenu('purchase'), (req, res) => {
   const b = req.body || {};
-  if (!b.no) return res.status(400).json({ error: 'ไม่มีเลขที่ใบเสร็จ' });
+  const date = b.date || todayISO();
+  b.no = b.no || nextReceiptNo(date);
   if (db.prepare('SELECT no FROM receipts WHERE no = ?').get(b.no)) {
     return res.status(409).json({ error: `เลขที่ใบเสร็จ ${b.no} ถูกใช้แล้ว` });
   }
   db.prepare(
-    `INSERT INTO receipts (no, date, time, cust, cust_id, issued_by, init, bg, fg, status, weight, deduction_weight, deduction_label, note, method, items, total, deduction_usage, slip_photo, vat_included, vat_amount)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO receipts (no, date, time, cust, cust_id, issued_by, init, bg, fg, status, weight, deduction_weight, deduction_label, note, method, items, total, deduction_usage, slip_photo, vat_included, vat_amount, goods_photo)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     b.no,
-    b.date || todayISO(),
+    date,
     b.time || '',
     b.cust || '',
     b.custId || null,
@@ -648,7 +701,8 @@ app.post('/api/receipts', requireAuth, requireMenu('purchase'), (req, res) => {
     JSON.stringify(b.deductionUsage || []),
     b.slipPhoto || '',
     b.vatIncluded ? 1 : 0,
-    b.vatAmount || 0
+    b.vatAmount || 0,
+    b.goodsPhoto || ''
   );
   const row = db.prepare('SELECT * FROM receipts WHERE no = ?').get(b.no);
   res.status(201).json({ receipt: toApiReceipt(row) });
@@ -1095,6 +1149,38 @@ app.delete('/api/categories/:id', requireAuth, requireMenu('categories'), (req, 
   res.json({ ok: true });
 });
 
+function toApiCashCount(row) {
+  return {
+    date: row.date,
+    openingFloat: row.opening_float,
+    countedCash: row.counted_cash,
+    note: row.note,
+    updatedBy: row.updated_by,
+    updatedAt: row.updated_at,
+  };
+}
+
+app.get('/api/cash-counts', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM cash_counts ORDER BY date DESC').all();
+  res.json({ cashCounts: rows.map(toApiCashCount) });
+});
+
+// Upsert one day's drawer count. countedCash may be null (opened, not yet counted at close).
+app.put('/api/cash-counts/:date', requireAuth, requireMenu('daily-summary'), (req, res) => {
+  const date = req.params.date;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'วันที่ไม่ถูกต้อง' });
+  const b = req.body || {};
+  const openingFloat = Number(b.openingFloat);
+  if (!(openingFloat >= 0)) return res.status(400).json({ error: 'กรุณากรอกเงินทอนตั้งต้นเป็นตัวเลข 0 ขึ้นไป' });
+  const counted = b.countedCash === null || b.countedCash === undefined || b.countedCash === '' ? null : Number(b.countedCash);
+  if (counted !== null && !(counted >= 0)) return res.status(400).json({ error: 'กรุณากรอกเงินสดที่นับได้เป็นตัวเลข 0 ขึ้นไป' });
+  db.prepare(
+    `INSERT INTO cash_counts (date, opening_float, counted_cash, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(date) DO UPDATE SET opening_float = excluded.opening_float, counted_cash = excluded.counted_cash, note = excluded.note, updated_by = excluded.updated_by, updated_at = excluded.updated_at`
+  ).run(date, openingFloat, counted, String(b.note || '').trim(), req.authUser.username || '');
+  res.json({ cashCount: toApiCashCount(db.prepare('SELECT * FROM cash_counts WHERE date = ?').get(date)) });
+});
+
 function toApiExpense(row) {
   return {
     id: row.id,
@@ -1290,6 +1376,8 @@ function toApiSettings(row) {
     receiptFooter: row.receipt_footer,
     remember30: !!row.remember30,
     pinLogin: !!row.pin_login,
+    requireSeller: !!row.require_seller,
+    watchKeywords: row.watch_keywords || '',
   };
 }
 
@@ -1306,7 +1394,7 @@ app.put('/api/settings', requireAuth, requireOwner, (req, res) => {
   const row = db.prepare("SELECT * FROM settings WHERE id = 'shop'").get();
   const b = req.body || {};
   db.prepare(
-    `UPDATE settings SET shop_name = ?, tax_id = ?, address = ?, phone = ?, hours = ?, receipt_footer = ?, remember30 = ?, pin_login = ? WHERE id = 'shop'`
+    `UPDATE settings SET shop_name = ?, tax_id = ?, address = ?, phone = ?, hours = ?, receipt_footer = ?, remember30 = ?, pin_login = ?, require_seller = ?, watch_keywords = ? WHERE id = 'shop'`
   ).run(
     b.shopName !== undefined ? b.shopName : row.shop_name,
     b.taxId !== undefined ? b.taxId : row.tax_id,
@@ -1315,7 +1403,9 @@ app.put('/api/settings', requireAuth, requireOwner, (req, res) => {
     b.hours !== undefined ? b.hours : row.hours,
     b.receiptFooter !== undefined ? b.receiptFooter : row.receipt_footer,
     b.remember30 !== undefined ? (b.remember30 ? 1 : 0) : row.remember30,
-    b.pinLogin !== undefined ? (b.pinLogin ? 1 : 0) : row.pin_login
+    b.pinLogin !== undefined ? (b.pinLogin ? 1 : 0) : row.pin_login,
+    b.requireSeller !== undefined ? (b.requireSeller ? 1 : 0) : row.require_seller,
+    b.watchKeywords !== undefined ? String(b.watchKeywords) : row.watch_keywords
   );
   res.json({ settings: toApiSettings(db.prepare("SELECT * FROM settings WHERE id = 'shop'").get()) });
 });
