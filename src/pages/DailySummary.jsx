@@ -109,6 +109,11 @@ export default function DailySummary() {
     .reduce((sum, p) => sum + (p.net || 0), 0);
   const cashExpensesToday = sumExpenses(expenses, expenseOrder, (date) => date === selectedDate, true);
   const cashOut = cashFromPurchases + cashPaidToStaff + cashExpensesToday;
+  // Buyers paying for shipments in cash are the drawer's cash IN (Deliveries.jsx "บันทึกรับเงิน").
+  const cashFromBuyers = deliveryOrder
+    .filter((id) => deliveries[id].paidDate === selectedDate && deliveries[id].paidMethod === 'cash')
+    .reduce((sum, id) => sum + (deliveries[id].paidAmount || 0), 0);
+  const netCash = cashFromBuyers - cashOut;
 
   // Hour-of-day buckets computed from each receipt's real recorded time.
   const hourBuckets = useMemo(() => {
@@ -328,7 +333,11 @@ export default function DailySummary() {
           <div className="card card-pad">
             <div className="card-title" style={{ marginBottom: 14 }}>
               <IconCash />
-              เงินสดจ่ายออก
+              กระทบยอดเงินสด
+            </div>
+            <div className="sum-row">
+              <span className="label">รับเงินสดจากผู้รับซื้อ</span>
+              <span className="val">+{money(cashFromBuyers)}</span>
             </div>
             <div className="sum-row">
               <span className="label">รับซื้อของด้วยเงินสด</span>
@@ -343,8 +352,8 @@ export default function DailySummary() {
               <span className="val minus">−{money(cashExpensesToday)}</span>
             </div>
             <div className="grand-total">
-              <span className="label">รวมเงินสดจ่ายออก</span>
-              <span className="val">−{money(cashOut)}</span>
+              <span className="label">เงินสดสุทธิวันนี้</span>
+              <span className="val" style={{ color: netCash < 0 ? 'var(--rose)' : undefined }}>{signedMoney(netCash)}</span>
             </div>
           </div>
 
@@ -439,6 +448,10 @@ export default function DailySummary() {
               <span>กำไรวันนี้ (ขาย − รับซื้อ − ค่าแรง − ค่าใช้จ่าย)</span>
               <b>{signedMoney(grossProfitToday)}</b>
             </div>
+            <div className="a4-doc-sum-row">
+              <span>รับเงินสดจากผู้รับซื้อ</span>
+              <b>+{money(cashFromBuyers)}</b>
+            </div>
             <div className="a4-doc-sum-row minus">
               <span>รับซื้อของด้วยเงินสด</span>
               <b>−{money(cashFromPurchases)}</b>
@@ -452,8 +465,8 @@ export default function DailySummary() {
               <b>−{money(cashExpensesToday)}</b>
             </div>
             <div className="a4-doc-grand">
-              <span>รวมเงินสดจ่ายออก</span>
-              <span>−{money(cashOut)}</span>
+              <span>เงินสดสุทธิวันนี้</span>
+              <span>{signedMoney(netCash)}</span>
             </div>
           </div>
 

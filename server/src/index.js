@@ -707,6 +707,9 @@ function toApiDelivery(row) {
     items: JSON.parse(row.items || '[]'),
     totalWeight: row.total_weight,
     totalAmount: row.total_amount,
+    paidAmount: row.paid_amount || 0,
+    paidDate: row.paid_date || '',
+    paidMethod: row.paid_method || '',
   };
 }
 
@@ -749,6 +752,24 @@ app.put('/api/deliveries/:no/deliver', requireAuth, requireMenu('deliveries'), (
   const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
   if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
   db.prepare('UPDATE deliveries SET status = ? WHERE no = ?').run('delivered', row.no);
+  res.json({ delivery: toApiDelivery(db.prepare('SELECT * FROM deliveries WHERE no = ?').get(row.no)) });
+});
+
+// Record (or undo) the buyer paying for a shipment. Registered before PUT /api/deliveries/:no
+// so Express doesn't read "payment" as part of that route. Body { paidAmount, paidDate,
+// paidMethod } marks it paid; { paid: false } clears it back to unpaid.
+app.put('/api/deliveries/:no/payment', requireAuth, requireMenu('deliveries'), (req, res) => {
+  const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
+  if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
+  const b = req.body || {};
+  if (b.paid === false) {
+    db.prepare("UPDATE deliveries SET paid_amount = 0, paid_date = '', paid_method = '' WHERE no = ?").run(row.no);
+  } else {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(b.paidDate || '')) return res.status(400).json({ error: 'กรุณาเลือกวันที่รับเงิน' });
+    if (!(Number(b.paidAmount) > 0)) return res.status(400).json({ error: 'กรุณากรอกจำนวนเงินที่ได้รับมากกว่า 0' });
+    if (!['cash', 'transfer', 'cheque'].includes(b.paidMethod)) return res.status(400).json({ error: 'วิธีรับเงินไม่ถูกต้อง' });
+    db.prepare('UPDATE deliveries SET paid_amount = ?, paid_date = ?, paid_method = ? WHERE no = ?').run(Number(b.paidAmount), b.paidDate, b.paidMethod, row.no);
+  }
   res.json({ delivery: toApiDelivery(db.prepare('SELECT * FROM deliveries WHERE no = ?').get(row.no)) });
 });
 

@@ -614,6 +614,9 @@ export default function PrintCenter() {
     // Both are cash going out of the drawer — their sum, not their difference.
     const cashExpensesToday = sumExpenses(expenses, expenseOrder, (date) => date === todayISO(), true);
     const cashOut = cashFromPurchases + cashPaidToStaff + cashExpensesToday;
+    const cashFromBuyers = deliveryOrder
+      .filter((id) => deliveries[id].paidDate === todayISO() && deliveries[id].paidMethod === 'cash')
+      .reduce((sum, id) => sum + (deliveries[id].paidAmount || 0), 0);
     const salesToday = sumSales(deliveries, deliveryOrder, (date) => date === todayISO());
     return (
       <div className="a4-doc">
@@ -642,6 +645,10 @@ export default function PrintCenter() {
             <span>ยอดขายให้ผู้รับซื้อวันนี้</span>
             <b>{money(salesToday)}</b>
           </div>
+          <div className="a4-doc-sum-row">
+            <span>รับเงินสดจากผู้รับซื้อ</span>
+            <b>+{money(cashFromBuyers)}</b>
+          </div>
           <div className="a4-doc-sum-row minus">
             <span>รับซื้อด้วยเงินสด</span>
             <b>−{money(cashFromPurchases)}</b>
@@ -655,8 +662,8 @@ export default function PrintCenter() {
             <b>−{money(cashExpensesToday)}</b>
           </div>
           <div className="a4-doc-sum-row">
-            <span>รวมเงินสดจ่ายออกวันนี้</span>
-            <b>−{money(cashOut)}</b>
+            <span>เงินสดสุทธิวันนี้</span>
+            <b>{signedMoney(cashFromBuyers - cashOut)}</b>
           </div>
         </div>
         <div className="a4-doc-foot">พิมพ์เมื่อ {nowStr()}</div>
