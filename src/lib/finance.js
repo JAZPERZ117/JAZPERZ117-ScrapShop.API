@@ -10,6 +10,17 @@ export function sumSales(deliveries, order, inRange) {
   return total;
 }
 
+// Shop running costs (ExpensesContext) in the same date range; `onlyCash` narrows to money that
+// physically left the cash drawer, for the daily cash figures.
+export function sumExpenses(expenses, order, inRange, onlyCash = false) {
+  let total = 0;
+  for (const id of order) {
+    const e = expenses[id];
+    if (e && inRange(e.date || '') && (!onlyCash || e.payMethod === 'cash')) total += e.amount || 0;
+  }
+  return total;
+}
+
 // Thai personal income tax brackets (progressive).
 const TAX_BRACKETS = [
   { upTo: 150000, rate: 0 },

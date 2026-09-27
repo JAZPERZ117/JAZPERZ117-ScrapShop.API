@@ -15,6 +15,7 @@ import {
   IconProductReport,
   IconTax,
   IconGear,
+  IconCash,
 } from '../icons.jsx';
 
 export const navSections = [
@@ -33,6 +34,7 @@ export const navSections = [
       { key: 'deductions', label: 'หักน้ำหนัก/เหตุผล', icon: IconDeduct, to: '/deductions' },
       { key: 'scales', label: 'เครื่องชั่ง', icon: IconScale, to: '/scales' },
       { key: 'deliveries', label: 'ใบส่งสินค้า', icon: IconTruck, to: '/deliveries' },
+      { key: 'expenses', label: 'ค่าใช้จ่ายร้าน', icon: IconCash, to: '/expenses' },
       { key: 'print-center', label: 'พิมพ์เอกสาร', icon: IconPrint, to: '/print-center' },
     ],
   },

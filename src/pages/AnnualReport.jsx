@@ -7,7 +7,8 @@ import { useCustomers } from '../context/CustomersContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useDeliveries } from '../context/DeliveriesContext.jsx';
-import { sumSales, signedMoney } from '../lib/finance.js';
+import { useExpenses } from '../context/ExpensesContext.jsx';
+import { sumSales, sumExpenses, signedMoney } from '../lib/finance.js';
 import './AnnualReport.css';
 
 const MONTH_LABELS_SHORT = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
@@ -70,6 +71,7 @@ export default function AnnualReport() {
   const { payHistory } = usePayroll();
   const { settings } = useSettings();
   const { deliveries, order: deliveryOrder } = useDeliveries();
+  const { expenses, order: expenseOrder } = useExpenses();
   const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void');
 
   const realNow = new Date();
@@ -148,7 +150,8 @@ export default function AnnualReport() {
     .filter((p) => new Date(p.paidAt).getFullYear() === currentYear)
     .reduce((s, p) => s + (p.net || 0), 0);
   const ytdSales = sumSales(deliveries, deliveryOrder, (date) => date.startsWith(`${currentYear}-`));
-  const netProfit = ytdSales - ytdPurchases - wagesPaid;
+  const ytdExpenses = sumExpenses(expenses, expenseOrder, (date) => date.startsWith(`${currentYear}-`));
+  const netProfit = ytdSales - ytdPurchases - wagesPaid - ytdExpenses;
   // "ลูกค้าใหม่ทั้งปี" means new this calendar year, not "ever added since install" — scope by
   // actual createdAt instead of just excluding the seed customers.
   const newCustomerIds = customerOrder.filter((id) => {
@@ -264,7 +267,7 @@ export default function AnnualReport() {
             <div className="stat-label">กำไรสุทธิทั้งปี</div>
             <div className="stat-value" style={{ color: netProfit < 0 ? 'var(--rose)' : undefined }}>{signedMoney(netProfit)}</div>
             <div className="stat-foot" style={{ color: 'var(--ink-500)' }}>
-              ขาย {money(ytdSales)} − รับซื้อ − เงินเดือน {money(wagesPaid)}
+              ขาย {money(ytdSales)} − รับซื้อ − เงินเดือน − ค่าใช้จ่าย {money(ytdExpenses)}
             </div>
           </div>
         </div>
@@ -499,6 +502,10 @@ export default function AnnualReport() {
             <div className="a4-doc-sum-row minus">
               <span>เงินเดือนลูกน้อง</span>
               <b>−{money(wagesPaid)}</b>
+            </div>
+            <div className="a4-doc-sum-row minus">
+              <span>ค่าใช้จ่ายร้าน</span>
+              <b>−{money(ytdExpenses)}</b>
             </div>
             <div className="a4-doc-grand">
               <span>กำไรสุทธิทั้งปี</span>

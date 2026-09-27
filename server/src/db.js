@@ -157,6 +157,20 @@ db.exec(`
   );
 `);
 
+// Added after the table above shipped — whether the buyer/factory has actually paid for a
+// shipment yet. Factories commonly pay days later (and sometimes a different amount after
+// re-weighing), so shipping and getting paid are tracked separately. paid_date '' = unpaid.
+const deliveryColumns = db.prepare('PRAGMA table_info(deliveries)').all().map((c) => c.name);
+if (!deliveryColumns.includes('paid_amount')) {
+  db.exec('ALTER TABLE deliveries ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0');
+}
+if (!deliveryColumns.includes('paid_date')) {
+  db.exec("ALTER TABLE deliveries ADD COLUMN paid_date TEXT NOT NULL DEFAULT ''");
+}
+if (!deliveryColumns.includes('paid_method')) {
+  db.exec("ALTER TABLE deliveries ADD COLUMN paid_method TEXT NOT NULL DEFAULT ''");
+}
+
 // Staff roster + weekly attendance/pay state used to live only in each browser's own
 // localStorage. Note: per-keystroke fields (advance, other amount/reason, and attendance
 // clicks) are deliberately NOT written to the server as they happen — the frontend keeps
@@ -303,6 +317,22 @@ db.exec(`
     receipt_footer TEXT NOT NULL DEFAULT '',
     remember30 INTEGER NOT NULL DEFAULT 1,
     pin_login INTEGER NOT NULL DEFAULT 1
+  );
+`);
+
+// Running costs of the shop itself (electricity, fuel, rent, repairs...) — separate from buying
+// scrap in (receipts) and from wages (pay_history), and deducted alongside both when reports
+// compute net profit and "actual cost" taxable income.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    category TEXT NOT NULL,
+    amount REAL NOT NULL,
+    pay_method TEXT NOT NULL DEFAULT 'cash',
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
 

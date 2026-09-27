@@ -84,9 +84,18 @@ export function DeliveriesProvider({ children }) {
     setDeliveries((prev) => ({ ...prev, [no]: data.delivery }));
   }
 
+  // Pass { paid: false } to undo a payment that was recorded by mistake.
+  async function recordPayment(no, payment) {
+    const res = await fetch(`/api/deliveries/${no}/payment`, { method: 'PUT', headers: authHeaders(), body: JSON.stringify(payment) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'บันทึกการรับเงินไม่สำเร็จ');
+    setDeliveries((prev) => ({ ...prev, [no]: data.delivery }));
+    return data.delivery;
+  }
+
   return (
     <DeliveriesContext.Provider
-      value={{ deliveries, order, addDelivery, updateDelivery, deleteDelivery, markDelivered, refresh }}
+      value={{ deliveries, order, addDelivery, updateDelivery, deleteDelivery, markDelivered, recordPayment, refresh }}
     >
       {children}
     </DeliveriesContext.Provider>

@@ -707,6 +707,9 @@ function toApiDelivery(row) {
     items: JSON.parse(row.items || '[]'),
     totalWeight: row.total_weight,
     totalAmount: row.total_amount,
+    paidAmount: row.paid_amount || 0,
+    paidDate: row.paid_date || '',
+    paidMethod: row.paid_method || '',
   };
 }
 
@@ -749,6 +752,24 @@ app.put('/api/deliveries/:no/deliver', requireAuth, requireMenu('deliveries'), (
   const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
   if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
   db.prepare('UPDATE deliveries SET status = ? WHERE no = ?').run('delivered', row.no);
+  res.json({ delivery: toApiDelivery(db.prepare('SELECT * FROM deliveries WHERE no = ?').get(row.no)) });
+});
+
+// Record (or undo) the buyer paying for a shipment. Registered before PUT /api/deliveries/:no
+// so Express doesn't read "payment" as part of that route. Body { paidAmount, paidDate,
+// paidMethod } marks it paid; { paid: false } clears it back to unpaid.
+app.put('/api/deliveries/:no/payment', requireAuth, requireMenu('deliveries'), (req, res) => {
+  const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
+  if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
+  const b = req.body || {};
+  if (b.paid === false) {
+    db.prepare("UPDATE deliveries SET paid_amount = 0, paid_date = '', paid_method = '' WHERE no = ?").run(row.no);
+  } else {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(b.paidDate || '')) return res.status(400).json({ error: 'กรุณาเลือกวันที่รับเงิน' });
+    if (!(Number(b.paidAmount) > 0)) return res.status(400).json({ error: 'กรุณากรอกจำนวนเงินที่ได้รับมากกว่า 0' });
+    if (!['cash', 'transfer', 'cheque'].includes(b.paidMethod)) return res.status(400).json({ error: 'วิธีรับเงินไม่ถูกต้อง' });
+    db.prepare('UPDATE deliveries SET paid_amount = ?, paid_date = ?, paid_method = ? WHERE no = ?').run(Number(b.paidAmount), b.paidDate, b.paidMethod, row.no);
+  }
   res.json({ delivery: toApiDelivery(db.prepare('SELECT * FROM deliveries WHERE no = ?').get(row.no)) });
 });
 
@@ -1071,6 +1092,70 @@ app.delete('/api/categories/:id', requireAuth, requireMenu('categories'), (req, 
   const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบหมวดหมู่นี้' });
   db.prepare('DELETE FROM categories WHERE id = ?').run(row.id);
+  res.json({ ok: true });
+});
+
+function toApiExpense(row) {
+  return {
+    id: row.id,
+    date: row.date,
+    category: row.category,
+    amount: row.amount,
+    payMethod: row.pay_method,
+    note: row.note,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+const EXPENSE_PAY_METHODS = ['cash', 'transfer', 'promptpay'];
+
+function validateExpense(b) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(b.date || '')) return 'กรุณาเลือกวันที่';
+  if (!String(b.category || '').trim()) return 'กรุณาเลือกหมวดค่าใช้จ่าย';
+  if (!(Number(b.amount) > 0)) return 'กรุณากรอกจำนวนเงินมากกว่า 0';
+  if (b.payMethod && !EXPENSE_PAY_METHODS.includes(b.payMethod)) return 'วิธีจ่ายเงินไม่ถูกต้อง';
+  return null;
+}
+
+// Readable by any signed-in role (the reports that deduct expenses are), writable only by roles
+// that can open the ค่าใช้จ่ายร้าน menu.
+app.get('/api/expenses', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM expenses ORDER BY date DESC, id DESC').all();
+  res.json({ expenses: rows.map(toApiExpense) });
+});
+
+app.post('/api/expenses', requireAuth, requireMenu('expenses'), (req, res) => {
+  const b = req.body || {};
+  const invalid = validateExpense(b);
+  if (invalid) return res.status(400).json({ error: invalid });
+  const result = db
+    .prepare('INSERT INTO expenses (date, category, amount, pay_method, note, created_by) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(b.date, b.category.trim(), Number(b.amount), b.payMethod || 'cash', String(b.note || '').trim(), req.authUser.username || '');
+  res.status(201).json({ expense: toApiExpense(db.prepare('SELECT * FROM expenses WHERE id = ?').get(result.lastInsertRowid)) });
+});
+
+app.put('/api/expenses/:id', requireAuth, requireMenu('expenses'), (req, res) => {
+  const row = db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบรายการค่าใช้จ่ายนี้' });
+  const b = { date: row.date, category: row.category, amount: row.amount, payMethod: row.pay_method, note: row.note, ...(req.body || {}) };
+  const invalid = validateExpense(b);
+  if (invalid) return res.status(400).json({ error: invalid });
+  db.prepare('UPDATE expenses SET date = ?, category = ?, amount = ?, pay_method = ?, note = ? WHERE id = ?').run(
+    b.date,
+    String(b.category).trim(),
+    Number(b.amount),
+    b.payMethod,
+    String(b.note || '').trim(),
+    row.id
+  );
+  res.json({ expense: toApiExpense(db.prepare('SELECT * FROM expenses WHERE id = ?').get(row.id)) });
+});
+
+app.delete('/api/expenses/:id', requireAuth, requireMenu('expenses'), (req, res) => {
+  const row = db.prepare('SELECT * FROM expenses WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบรายการค่าใช้จ่ายนี้' });
+  db.prepare('DELETE FROM expenses WHERE id = ?').run(row.id);
   res.json({ ok: true });
 });
 
