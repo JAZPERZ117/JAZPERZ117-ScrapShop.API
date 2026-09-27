@@ -144,6 +144,21 @@ function requireOwner(req, res, next) {
   next();
 }
 
+// The frontend only ever hid menus a role can't open — every API route below still accepted any
+// logged-in session, so e.g. a scale operator could void receipts or pay wages with a direct
+// request. This checks the same role -> menu table the sidebar uses (src/lib/rolePermissions.json)
+// and allows a write if the caller's role can open ANY of the menus that legitimately make it
+// (adding stock by name, for instance, happens from รับซื้อ, ใบเสร็จ and ใบส่งของ alike).
+const ROLE_PERMISSIONS = require('../../src/lib/rolePermissions.json');
+
+function requireMenu(...menuKeys) {
+  return (req, res, next) => {
+    const allowed = ROLE_PERMISSIONS.roles[req.authUser?.role] || [];
+    if (menuKeys.some((k) => allowed.includes(k))) return next();
+    res.status(403).json({ error: 'ตำแหน่งของคุณไม่มีสิทธิ์ทำรายการนี้ — ติดต่อเจ้าของร้าน' });
+  };
+}
+
 function toPublicUser(row) {
   return {
     id: row.id,
@@ -281,7 +296,7 @@ app.get('/api/customers', requireAuth, (req, res) => {
   res.json({ customers: rows.map(toApiCustomer) });
 });
 
-app.post('/api/customers', requireAuth, (req, res) => {
+app.post('/api/customers', requireAuth, requireMenu('purchase', 'customers'), (req, res) => {
   const { name, phone, idNumber, idExpiry, idPhoto } = req.body || {};
   if (!name?.trim()) {
     return res.status(400).json({ error: 'กรุณากรอกชื่อลูกค้า' });
@@ -297,7 +312,7 @@ app.post('/api/customers', requireAuth, (req, res) => {
   res.status(201).json({ customer: toApiCustomer(row) });
 });
 
-app.put('/api/customers/:id', requireAuth, (req, res) => {
+app.put('/api/customers/:id', requireAuth, requireMenu('customers'), (req, res) => {
   const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบลูกค้ารายนี้' });
   const body = req.body || {};
@@ -317,7 +332,7 @@ app.put('/api/customers/:id', requireAuth, (req, res) => {
   res.json({ customer: toApiCustomer(db.prepare('SELECT * FROM customers WHERE id = ?').get(row.id)) });
 });
 
-app.delete('/api/customers/:id', requireAuth, (req, res) => {
+app.delete('/api/customers/:id', requireAuth, requireMenu('customers'), (req, res) => {
   const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบลูกค้ารายนี้' });
   db.prepare('DELETE FROM customers WHERE id = ?').run(row.id);
@@ -329,7 +344,7 @@ app.delete('/api/customers/:id', requireAuth, (req, res) => {
 // (read-modify-write against the row that's already the source of truth) rather than the client
 // sending a precomputed next value, so two devices completing a sale for the same customer at
 // nearly the same moment can't race and silently drop one update.
-app.post('/api/customers/:id/record-purchase', requireAuth, (req, res) => {
+app.post('/api/customers/:id/record-purchase', requireAuth, requireMenu('purchase', 'receipts'), (req, res) => {
   const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบลูกค้ารายนี้' });
   const { weightKg, amount, receiptNo, timeStr } = req.body || {};
@@ -350,7 +365,7 @@ app.post('/api/customers/:id/record-purchase', requireAuth, (req, res) => {
 
 // Inverse of record-purchase — called when a receipt is voided (Receipts.jsx) so a cancelled
 // purchase doesn't permanently overstate the customer's lifetime weight/spend/visit count.
-app.post('/api/customers/:id/reverse-purchase', requireAuth, (req, res) => {
+app.post('/api/customers/:id/reverse-purchase', requireAuth, requireMenu('receipts'), (req, res) => {
   const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบลูกค้ารายนี้' });
   const { weightKg, amount, receiptNo } = req.body || {};
@@ -413,7 +428,7 @@ app.get('/api/products', requireAuth, (req, res) => {
   res.json({ products: rows.map(toApiProduct) });
 });
 
-app.post('/api/products', requireAuth, (req, res) => {
+app.post('/api/products', requireAuth, requireMenu('products'), (req, res) => {
   const { name, cat, price } = req.body || {};
   if (!name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อสินค้า' });
   const id = `prod_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -429,14 +444,14 @@ app.post('/api/products', requireAuth, (req, res) => {
 // product, checking its cat, and writing each one back individually. Registered before
 // PUT /api/products/:id below — Express matches routes in registration order, and :id would
 // otherwise greedily match the literal path segment "reassign-category" as an id.
-app.put('/api/products/reassign-category', requireAuth, (req, res) => {
+app.put('/api/products/reassign-category', requireAuth, requireMenu('categories'), (req, res) => {
   const { fromCat, toCat } = req.body || {};
   if (!fromCat || !toCat) return res.status(400).json({ error: 'ข้อมูลไม่ถูกต้อง' });
   const info = db.prepare('UPDATE products SET cat = ? WHERE cat = ?').run(toCat, fromCat);
   res.json({ movedCount: info.changes });
 });
 
-app.put('/api/products/:id', requireAuth, (req, res) => {
+app.put('/api/products/:id', requireAuth, requireMenu('products'), (req, res) => {
   const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
   const body = req.body || {};
@@ -450,7 +465,7 @@ app.put('/api/products/:id', requireAuth, (req, res) => {
   res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
 });
 
-app.delete('/api/products/:id', requireAuth, (req, res) => {
+app.delete('/api/products/:id', requireAuth, requireMenu('products'), (req, res) => {
   const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
   db.prepare('DELETE FROM products WHERE id = ?').run(row.id);
@@ -460,7 +475,7 @@ app.delete('/api/products/:id', requireAuth, (req, res) => {
 // Records a real price change as it happens, computing the 7-day history/sparkline/% change
 // server-side (read-modify-write against the row that's the actual source of truth) instead of
 // the client sending a precomputed next value — same reasoning as customers' record-purchase.
-app.post('/api/products/:id/price', requireAuth, (req, res) => {
+app.post('/api/products/:id/price', requireAuth, requireMenu('products'), (req, res) => {
   const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
   const { price: newPrice } = req.body || {};
@@ -492,7 +507,7 @@ app.post('/api/products/:id/price', requireAuth, (req, res) => {
 // purchase row is free-text, not tied to a real product id. A row typed into a blank slot with
 // a name that doesn't match any cataloged product is still a real purchase, so this creates the
 // product (priced at what was actually paid) rather than silently dropping the stock update.
-app.post('/api/products/add-stock', requireAuth, (req, res) => {
+app.post('/api/products/add-stock', requireAuth, requireMenu('purchase', 'receipts', 'deliveries'), (req, res) => {
   const { name, weightKg, unitPrice } = req.body || {};
   const trimmed = (name || '').trim();
   if (!trimmed || !(weightKg > 0)) return res.status(400).json({ error: 'ข้อมูลไม่ถูกต้อง' });
@@ -512,7 +527,7 @@ app.post('/api/products/add-stock', requireAuth, (req, res) => {
 // Shipping accumulated stock out to a buyer (see Deliveries.jsx) removes it from on-hand
 // stock, by id — the delivery form picks a real product directly, unlike ScrapPurchase's
 // free-text row names.
-app.post('/api/products/:id/remove-stock', requireAuth, (req, res) => {
+app.post('/api/products/:id/remove-stock', requireAuth, requireMenu('deliveries'), (req, res) => {
   const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
   const { weightKg } = req.body || {};
@@ -527,7 +542,7 @@ app.post('/api/products/:id/remove-stock', requireAuth, (req, res) => {
 // 404s instead of fabricating a placeholder product if it was deleted since the delivery was
 // created — the client treats that as "couldn't restore automatically" and warns the user,
 // rather than this silently corrupting the catalog with a new placeholder.
-app.post('/api/products/:id/add-stock', requireAuth, (req, res) => {
+app.post('/api/products/:id/add-stock', requireAuth, requireMenu('deliveries'), (req, res) => {
   const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
   const { weightKg } = req.body || {};
@@ -541,7 +556,7 @@ app.post('/api/products/:id/add-stock', requireAuth, (req, res) => {
 // Voiding or editing a receipt (see Receipts.jsx) needs to give back stock by name — receipts
 // only ever recorded item names, not ids, matching how add-stock above looks products up. A
 // no-op (not an error) when nothing matches, same as the old client-side behavior.
-app.post('/api/products/remove-stock-by-name', requireAuth, (req, res) => {
+app.post('/api/products/remove-stock-by-name', requireAuth, requireMenu('receipts'), (req, res) => {
   const { name, weightKg } = req.body || {};
   const trimmed = (name || '').trim();
   if (!trimmed || !(weightKg > 0)) return res.json({ ok: true });
@@ -594,7 +609,7 @@ app.get('/api/receipts', requireAuth, (req, res) => {
   res.json({ receipts: rows.map(toApiReceipt) });
 });
 
-app.post('/api/receipts', requireAuth, (req, res) => {
+app.post('/api/receipts', requireAuth, requireMenu('purchase'), (req, res) => {
   const b = req.body || {};
   if (!b.no) return res.status(400).json({ error: 'ไม่มีเลขที่ใบเสร็จ' });
   if (db.prepare('SELECT no FROM receipts WHERE no = ?').get(b.no)) {
@@ -634,7 +649,7 @@ app.post('/api/receipts', requireAuth, (req, res) => {
 // (plus a timestamp for Dashboard.jsx's "most recently voided" ordering); the actual stock and
 // customer-total reversal happens via the products/customers endpoints, called independently by
 // the client, same as this codebase's existing void flow already did client-side.
-app.put('/api/receipts/:no/void', requireAuth, (req, res) => {
+app.put('/api/receipts/:no/void', requireAuth, requireMenu('receipts'), (req, res) => {
   const row = db.prepare('SELECT * FROM receipts WHERE no = ?').get(req.params.no);
   if (!row) return res.status(404).json({ error: 'ไม่พบใบเสร็จนี้' });
   if (row.status !== 'void') {
@@ -646,7 +661,7 @@ app.put('/api/receipts/:no/void', requireAuth, (req, res) => {
 // Editing a receipt's items/weights (see Receipts.jsx) — refuses once voided for the same
 // reason the old client-side check did: a void has already reversed stock/customer totals
 // against the pre-edit numbers, so an edit landing afterward would drift them out of sync.
-app.put('/api/receipts/:no', requireAuth, (req, res) => {
+app.put('/api/receipts/:no', requireAuth, requireMenu('receipts'), (req, res) => {
   const row = db.prepare('SELECT * FROM receipts WHERE no = ?').get(req.params.no);
   if (!row) return res.status(404).json({ error: 'ไม่พบใบเสร็จนี้' });
   if (row.status === 'void') return res.status(409).json({ error: 'ใบเสร็จนี้ถูกยกเลิกไปแล้ว ไม่สามารถแก้ไขได้' });
@@ -694,7 +709,7 @@ app.get('/api/deliveries', requireAuth, (req, res) => {
   res.json({ deliveries: rows.map(toApiDelivery) });
 });
 
-app.post('/api/deliveries', requireAuth, (req, res) => {
+app.post('/api/deliveries', requireAuth, requireMenu('deliveries'), (req, res) => {
   const b = req.body || {};
   if (!b.no) return res.status(400).json({ error: 'ไม่มีเลขที่ใบส่งของ' });
   if (db.prepare('SELECT no FROM deliveries WHERE no = ?').get(b.no)) {
@@ -721,14 +736,14 @@ app.post('/api/deliveries', requireAuth, (req, res) => {
   res.status(201).json({ delivery: toApiDelivery(row) });
 });
 
-app.put('/api/deliveries/:no/deliver', requireAuth, (req, res) => {
+app.put('/api/deliveries/:no/deliver', requireAuth, requireMenu('deliveries'), (req, res) => {
   const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
   if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
   db.prepare('UPDATE deliveries SET status = ? WHERE no = ?').run('delivered', row.no);
   res.json({ delivery: toApiDelivery(db.prepare('SELECT * FROM deliveries WHERE no = ?').get(row.no)) });
 });
 
-app.put('/api/deliveries/:no', requireAuth, (req, res) => {
+app.put('/api/deliveries/:no', requireAuth, requireMenu('deliveries'), (req, res) => {
   const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
   if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
   const b = req.body || {};
@@ -749,7 +764,7 @@ app.put('/api/deliveries/:no', requireAuth, (req, res) => {
   res.json({ delivery: toApiDelivery(db.prepare('SELECT * FROM deliveries WHERE no = ?').get(row.no)) });
 });
 
-app.delete('/api/deliveries/:no', requireAuth, (req, res) => {
+app.delete('/api/deliveries/:no', requireAuth, requireMenu('deliveries'), (req, res) => {
   const row = db.prepare('SELECT * FROM deliveries WHERE no = ?').get(req.params.no);
   if (!row) return res.status(404).json({ error: 'ไม่พบใบส่งของนี้' });
   db.prepare('DELETE FROM deliveries WHERE no = ?').run(row.no);
@@ -807,7 +822,7 @@ app.get('/api/staff', requireAuth, (req, res) => {
   res.json({ staff: rows.map(toApiStaff) });
 });
 
-app.post('/api/staff', requireAuth, (req, res) => {
+app.post('/api/staff', requireAuth, requireMenu('payroll'), (req, res) => {
   const b = req.body || {};
   if (!b.name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อพนักงาน' });
   const id = `staff_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -822,7 +837,7 @@ app.post('/api/staff', requireAuth, (req, res) => {
 // (days/attendance/advance/otherAmount/otherReasonId/otherCustomReason/paid), and the
 // one-click "จ่ายแล้ว"/"ค้างจ่าย" badge toggle (paid only). Whichever fields the caller
 // sends are the ones that change; everything else on the row is left alone.
-app.put('/api/staff/:id', requireAuth, (req, res) => {
+app.put('/api/staff/:id', requireAuth, requireMenu('payroll'), (req, res) => {
   const row = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบข้อมูลพนักงาน' });
   const b = req.body || {};
@@ -845,7 +860,7 @@ app.put('/api/staff/:id', requireAuth, (req, res) => {
   res.json({ staff: toApiStaff(db.prepare('SELECT * FROM staff WHERE id = ?').get(row.id)) });
 });
 
-app.delete('/api/staff/:id', requireAuth, (req, res) => {
+app.delete('/api/staff/:id', requireAuth, requireMenu('payroll'), (req, res) => {
   const row = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบข้อมูลพนักงาน' });
   db.prepare('DELETE FROM staff WHERE id = ?').run(row.id);
@@ -857,7 +872,7 @@ app.delete('/api/staff/:id', requireAuth, (req, res) => {
 // key/label — these are just labels, not values another device could race on) and resets the
 // staff row's week-local fields in one call, so a client can't save the history entry but
 // fail to reset the roster row (or vice versa) from a single dropped request.
-app.post('/api/staff/:id/pay', requireAuth, (req, res) => {
+app.post('/api/staff/:id/pay', requireAuth, requireMenu('payroll'), (req, res) => {
   const row = db.prepare('SELECT * FROM staff WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบข้อมูลพนักงาน' });
   const b = req.body || {};
@@ -926,7 +941,7 @@ app.get('/api/deduction-reasons', requireAuth, (req, res) => {
   res.json({ reasons: rows.map(toApiReason) });
 });
 
-app.post('/api/deduction-reasons', requireAuth, (req, res) => {
+app.post('/api/deduction-reasons', requireAuth, requireMenu('deductions'), (req, res) => {
   const b = req.body || {};
   if (!b.name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อเหตุผล' });
   const id = `reason_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -937,7 +952,7 @@ app.post('/api/deduction-reasons', requireAuth, (req, res) => {
   res.status(201).json({ reason: toApiReason(row) });
 });
 
-app.put('/api/deduction-reasons/:id', requireAuth, (req, res) => {
+app.put('/api/deduction-reasons/:id', requireAuth, requireMenu('deductions'), (req, res) => {
   const row = db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบเหตุผลนี้' });
   const b = req.body || {};
@@ -954,7 +969,7 @@ app.put('/api/deduction-reasons/:id', requireAuth, (req, res) => {
   res.json({ reason: toApiReason(db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(row.id)) });
 });
 
-app.delete('/api/deduction-reasons/:id', requireAuth, (req, res) => {
+app.delete('/api/deduction-reasons/:id', requireAuth, requireMenu('deductions'), (req, res) => {
   const row = db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบเหตุผลนี้' });
   db.prepare('DELETE FROM deduction_reasons WHERE id = ?').run(row.id);
@@ -964,7 +979,7 @@ app.delete('/api/deduction-reasons/:id', requireAuth, (req, res) => {
 // Called once per reason actually applied on a submitted receipt (see ScrapPurchase.jsx), so
 // "ใช้แล้ว N ครั้ง"/"ยอดหักรวม" reflect real usage — read-modify-write against the row that's
 // the actual source of truth, same reasoning as customers' record-purchase.
-app.post('/api/deduction-reasons/:id/increment-usage', requireAuth, (req, res) => {
+app.post('/api/deduction-reasons/:id/increment-usage', requireAuth, requireMenu('purchase'), (req, res) => {
   const row = db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(req.params.id);
   if (!row) return res.json({ ok: true });
   const { amount } = req.body || {};
@@ -975,7 +990,7 @@ app.post('/api/deduction-reasons/:id/increment-usage', requireAuth, (req, res) =
 // Inverse of increment-usage — called when a receipt that applied this reason gets voided
 // (see Receipts.jsx handleVoid), so the counters don't stay permanently inflated by a purchase
 // that was fully reversed everywhere else.
-app.post('/api/deduction-reasons/:id/decrement-usage', requireAuth, (req, res) => {
+app.post('/api/deduction-reasons/:id/decrement-usage', requireAuth, requireMenu('receipts'), (req, res) => {
   const row = db.prepare('SELECT * FROM deduction_reasons WHERE id = ?').get(req.params.id);
   if (!row) return res.json({ ok: true });
   const { amount } = req.body || {};
@@ -1000,7 +1015,7 @@ app.get('/api/categories', requireAuth, (req, res) => {
   res.json({ categories: rows.map(toApiCategory) });
 });
 
-app.post('/api/categories', requireAuth, (req, res) => {
+app.post('/api/categories', requireAuth, requireMenu('categories'), (req, res) => {
   const b = req.body || {};
   if (!b.name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อหมวดหมู่' });
   const id = `cat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1018,7 +1033,7 @@ app.post('/api/categories', requireAuth, (req, res) => {
 // Persists a full manual reorder (see Categories.jsx's "เรียงลำดับ" sort-by-name action) —
 // registered before PUT /api/categories/:id below, since Express would otherwise match the
 // literal path segment "reorder" as an :id.
-app.put('/api/categories/reorder', requireAuth, (req, res) => {
+app.put('/api/categories/reorder', requireAuth, requireMenu('categories'), (req, res) => {
   const { order } = req.body || {};
   if (!Array.isArray(order)) return res.status(400).json({ error: 'ข้อมูลไม่ถูกต้อง' });
   const update = db.prepare('UPDATE categories SET sort_order = ? WHERE id = ?');
@@ -1027,7 +1042,7 @@ app.put('/api/categories/reorder', requireAuth, (req, res) => {
   res.json({ categories: rows.map(toApiCategory) });
 });
 
-app.put('/api/categories/:id', requireAuth, (req, res) => {
+app.put('/api/categories/:id', requireAuth, requireMenu('categories'), (req, res) => {
   const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบหมวดหมู่นี้' });
   const b = req.body || {};
@@ -1043,7 +1058,7 @@ app.put('/api/categories/:id', requireAuth, (req, res) => {
   res.json({ category: toApiCategory(db.prepare('SELECT * FROM categories WHERE id = ?').get(row.id)) });
 });
 
-app.delete('/api/categories/:id', requireAuth, (req, res) => {
+app.delete('/api/categories/:id', requireAuth, requireMenu('categories'), (req, res) => {
   const row = db.prepare('SELECT * FROM categories WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบหมวดหมู่นี้' });
   db.prepare('DELETE FROM categories WHERE id = ?').run(row.id);
@@ -1079,7 +1094,7 @@ app.get('/api/scales', requireAuth, (req, res) => {
 // Manually adding a device ("เพิ่มเครื่องชั่ง") puts it first; a network scan finding one
 // ("สแกนหาเครื่องใหม่") appends it last — same two-rule ordering Scales.jsx already had, now
 // backed by sort_order instead of each browser's own insertion order.
-app.post('/api/scales', requireAuth, (req, res) => {
+app.post('/api/scales', requireAuth, requireMenu('scales'), (req, res) => {
   const b = req.body || {};
   if (!b.name?.trim()) return res.status(400).json({ error: 'กรุณากรอกชื่อเครื่องชั่ง' });
   const id = `scale_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1114,7 +1129,7 @@ app.post('/api/scales', requireAuth, (req, res) => {
   res.status(201).json({ scale: toApiScale(row) });
 });
 
-app.put('/api/scales/:id', requireAuth, (req, res) => {
+app.put('/api/scales/:id', requireAuth, requireMenu('scales'), (req, res) => {
   const row = db.prepare('SELECT * FROM scales WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบเครื่องชั่งนี้' });
   const b = req.body || {};
@@ -1135,7 +1150,7 @@ app.put('/api/scales/:id', requireAuth, (req, res) => {
 // "ใช้เป็นเครื่องชั่งหลัก" is exclusive — only one device can be the one ScrapPurchase.jsx reads
 // from — so this clears every other device's `active` flag in the same statement instead of the
 // client computing that exclusivity itself and risking two devices ending up active at once.
-app.put('/api/scales/:id/set-active', requireAuth, (req, res) => {
+app.put('/api/scales/:id/set-active', requireAuth, requireMenu('scales'), (req, res) => {
   const row = db.prepare('SELECT * FROM scales WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบเครื่องชั่งนี้' });
   const active = !!(req.body || {}).active;
@@ -1144,7 +1159,7 @@ app.put('/api/scales/:id/set-active', requireAuth, (req, res) => {
   res.json({ scale: toApiScale(db.prepare('SELECT * FROM scales WHERE id = ?').get(row.id)) });
 });
 
-app.delete('/api/scales/:id', requireAuth, (req, res) => {
+app.delete('/api/scales/:id', requireAuth, requireMenu('scales'), (req, res) => {
   const row = db.prepare('SELECT * FROM scales WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบเครื่องชั่งนี้' });
   // ScrapPurchase.jsx reads the main device unconditionally, so it can never be left with zero.
@@ -1159,7 +1174,7 @@ app.get('/api/scales-activity', requireAuth, (req, res) => {
   res.json({ activity: rows.map((r) => ({ icon: r.icon, title: r.title, sub: r.sub, amt: r.amt })) });
 });
 
-app.post('/api/scales-activity', requireAuth, (req, res) => {
+app.post('/api/scales-activity', requireAuth, requireMenu('scales', 'purchase'), (req, res) => {
   const b = req.body || {};
   db.prepare('INSERT INTO scale_activity (icon, title, sub, amt) VALUES (?, ?, ?, ?)').run(
     b.icon || 'ok',

@@ -1,0 +1,39 @@
+{
+  "allMenuKeys": [
+    "dashboard",
+    "purchase",
+    "receipts",
+    "payroll",
+    "customers",
+    "products",
+    "categories",
+    "deductions",
+    "scales",
+    "deliveries",
+    "print-center",
+    "daily-summary",
+    "monthly-report",
+    "annual-report",
+    "product-report",
+    "tax-report",
+    "payroll-report",
+    "users",
+    "settings"
+  ],
+  "roles": {
+    "owner": [
+      "dashboard", "purchase", "receipts", "payroll", "customers", "products", "categories", "deductions", "scales", "deliveries",
+      "print-center", "daily-summary", "monthly-report", "annual-report", "product-report", "tax-report", "payroll-report", "users", "settings"
+    ],
+    "เจ้าของร้าน": [
+      "dashboard", "purchase", "receipts", "payroll", "customers", "products", "categories", "deductions", "scales", "deliveries",
+      "print-center", "daily-summary", "monthly-report", "annual-report", "product-report", "tax-report", "payroll-report", "users", "settings"
+    ],
+    "ผู้จัดการ": [
+      "dashboard", "purchase", "receipts", "payroll", "customers", "products", "categories", "deductions", "scales", "deliveries",
+      "print-center", "daily-summary", "monthly-report", "annual-report", "product-report", "tax-report", "payroll-report"
+    ],
+    "แคชเชียร์": ["dashboard", "purchase", "receipts", "customers", "deductions", "print-center", "daily-summary"],
+    "พนักงานชั่งของ": ["dashboard", "purchase", "scales"]
+  }
+}
