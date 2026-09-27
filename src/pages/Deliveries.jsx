@@ -3,6 +3,7 @@ import { useDeliveries } from '../context/DeliveriesContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { exportCsv } from '../lib/csvExport.js';
+import { signedMoney } from '../lib/finance.js';
 import RowMenu from '../components/RowMenu.jsx';
 import { IconTruck, IconPlus, IconTrash, IconX, IconCheck, IconPrint, IconDownload, IconClockHistory, IconEdit, IconCash } from '../icons.jsx';
 import './Deliveries.css';
@@ -919,7 +920,7 @@ export default function Deliveries() {
                         {Math.abs(selected.paidAmount - invoiceTotal(selected)) >= 0.01 && (
                           <div className="sum-row">
                             <span className="label">ส่วนต่าง (เช่น โรงงานชั่งใหม่)</span>
-                            <span className="val">{money(selected.paidAmount - invoiceTotal(selected))}</span>
+                            <span className="val">{signedMoney(selected.paidAmount - invoiceTotal(selected))}</span>
                           </div>
                         )}
                         <button type="button" className="btn btn-ghost btn-block" onClick={handleUndoPayment}>
