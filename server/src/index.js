@@ -604,6 +604,7 @@ function toApiReceipt(row) {
     deductionUsage: JSON.parse(row.deduction_usage || '[]'),
     voidedAt: row.voided_at,
     slipPhoto: row.slip_photo || '',
+    goodsPhoto: row.goods_photo || '',
     vatIncluded: !!row.vat_included,
     vatAmount: row.vat_amount || 0,
   };
@@ -626,8 +627,8 @@ app.post('/api/receipts', requireAuth, requireMenu('purchase'), (req, res) => {
     return res.status(409).json({ error: `เลขที่ใบเสร็จ ${b.no} ถูกใช้แล้ว` });
   }
   db.prepare(
-    `INSERT INTO receipts (no, date, time, cust, cust_id, issued_by, init, bg, fg, status, weight, deduction_weight, deduction_label, note, method, items, total, deduction_usage, slip_photo, vat_included, vat_amount)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO receipts (no, date, time, cust, cust_id, issued_by, init, bg, fg, status, weight, deduction_weight, deduction_label, note, method, items, total, deduction_usage, slip_photo, vat_included, vat_amount, goods_photo)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     b.no,
     b.date || todayISO(),
@@ -649,7 +650,8 @@ app.post('/api/receipts', requireAuth, requireMenu('purchase'), (req, res) => {
     JSON.stringify(b.deductionUsage || []),
     b.slipPhoto || '',
     b.vatIncluded ? 1 : 0,
-    b.vatAmount || 0
+    b.vatAmount || 0,
+    b.goodsPhoto || ''
   );
   const row = db.prepare('SELECT * FROM receipts WHERE no = ?').get(b.no);
   res.status(201).json({ receipt: toApiReceipt(row) });
