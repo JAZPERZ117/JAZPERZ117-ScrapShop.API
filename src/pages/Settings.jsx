@@ -170,6 +170,33 @@ export default function Settings() {
 
           <div className="card card-pad">
             <div className="card-title" style={{ marginBottom: 14 }}>
+              <IconShop />
+              บัญชีรับซื้อของเก่า
+            </div>
+            <div className="toggle-row">
+              <div>
+                <div className="lbl">บังคับระบุผู้ขายทุกครั้ง</div>
+                <div className="sub">ห้ามบันทึกแบบลูกค้าขาจร — ต้องเลือกผู้ขายที่มีเลขบัตรประชาชน เพื่อให้บัญชีรับซื้อครบถ้วน</div>
+              </div>
+              <button type="button" className={`switch${form.requireSeller ? ' on' : ''}`} onClick={() => setField('requireSeller', !form.requireSeller)}></button>
+            </div>
+            <div className="field" style={{ marginTop: 12 }}>
+              <label>คำเตือนของต้องสงสัย (บรรทัดละคำ)</label>
+              <textarea
+                className="input-plain"
+                rows={6}
+                value={form.watchKeywords || ''}
+                onChange={(e) => setField('watchKeywords', e.target.value)}
+                placeholder="เช่น ฝาท่อ"
+              />
+              <div style={{ fontSize: 11, color: 'var(--ink-500)', marginTop: 4 }}>
+                ถ้าชื่อรายการหรือหมายเหตุตอนรับซื้อมีคำเหล่านี้ ระบบจะเตือนและให้ยืนยันก่อนบันทึก
+              </div>
+            </div>
+          </div>
+
+          <div className="card card-pad">
+            <div className="card-title" style={{ marginBottom: 14 }}>
               <IconInfo />
               เกี่ยวกับระบบ
             </div>

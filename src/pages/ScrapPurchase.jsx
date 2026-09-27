@@ -83,10 +83,6 @@ function makeRow(category) {
   };
 }
 
-function makeDraftNo() {
-  return 'RC' + Date.now().toString().slice(-9);
-}
-
 export default function ScrapPurchase() {
   const navigate = useNavigate();
   const { customers, order: customerOrder, addCustomer, recordPurchase } = useCustomers();
@@ -114,7 +110,6 @@ export default function ScrapPurchase() {
         .map((p) => ({ name: p.name, price: p.price, icon: p.Icon, bg: p.bg, fg: p.fg })),
     [products, productOrder, activeCategoryNames]
   );
-  const [draftNo, setDraftNo] = useState(makeDraftNo);
   const [custQuery, setCustQuery] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [showNewCustomer, setShowNewCustomer] = useState(false);
@@ -127,6 +122,7 @@ export default function ScrapPurchase() {
   const [newCustIdNumber, setNewCustIdNumber] = useState('');
   const [newCustIdExpiry, setNewCustIdExpiry] = useState('');
   const [newCustIdPhoto, setNewCustIdPhoto] = useState('');
+  const [newCustAddr, setNewCustAddr] = useState('');
 
   const [rows, setRows] = useState([]);
 
@@ -135,6 +131,7 @@ export default function ScrapPurchase() {
   // Proof the shop actually transferred the money — only meaningful for โอนเงิน, so it's
   // only ever attached to (and included on) a receipt paid that way.
   const [transferSlipPhoto, setTransferSlipPhoto] = useState('');
+  const [goodsPhoto, setGoodsPhoto] = useState('');
 
   const [showDeduction, setShowDeduction] = useState(false);
   const [deductionWeight, setDeductionWeight] = useState('');
@@ -336,8 +333,10 @@ export default function ScrapPurchase() {
         idNumber: newCustIdNumber.trim(),
         idExpiry: newCustIdExpiry,
         idPhoto: newCustIdPhoto,
+        addr: newCustAddr.trim(),
       });
       setSelectedCustomer(created);
+      setNewCustAddr('');
       setNewCustName('');
       setNewCustPhone('');
       setNewCustIdNumber('');
@@ -387,8 +386,8 @@ export default function ScrapPurchase() {
     setShowDeduction(false);
     setPayMethod('cash');
     setTransferSlipPhoto('');
+    setGoodsPhoto('');
     setIncludeVat(false);
-    setDraftNo(makeDraftNo());
     setDraft(null);
   }
 
@@ -418,16 +417,41 @@ export default function ScrapPurchase() {
     setBanner({ type: 'success', text: 'บันทึกฉบับร่างเรียบร้อยแล้ว — ครั้งถัดไปที่เปิดหน้านี้จะมีให้ตรวจสอบก่อนนำเข้าฟอร์ม' });
   }
 
+  // Items whose name (or the note) matches a word on the shop's watch-list — likely stolen
+  // public/utility property. Shown as a warning while filling in, and confirmed on submit.
+  const watchWords = (settings.watchKeywords || '')
+    .split(/\r?\n|,/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+  const watchHits = watchWords.filter((w) => rows.some((r) => (r.name || '').includes(w)) || note.includes(w));
+
   async function handleSubmit() {
     if (rows.length === 0 || totalWeight <= 0) {
       setBanner({ type: 'error', text: 'กรุณาเพิ่มรายการสินค้าและระบุน้ำหนักก่อนบันทึก' });
       return;
     }
-    // No customer selected genuinely means a walk-in sale, per the placeholder text right
-    // above the customer search box ("รายการนี้จะบันทึกเป็นลูกค้าขาจร") — this used to
-    // contradict that by blocking submission outright instead of actually recording one.
+    // Settings → "บังคับระบุผู้ขายทุกครั้ง": the purchase register needs a named seller with an
+    // ID number on every line, so an anonymous walk-in is refused while that's on.
+    if (settings.requireSeller && !selectedCustomer?.idNumber) {
+      setBanner({
+        type: 'error',
+        text: selectedCustomer
+          ? `${selectedCustomer.name} ยังไม่มีเลขบัตรประชาชนในระบบ — แก้ไขข้อมูลลูกค้าก่อน (ร้านตั้งค่าให้บังคับระบุผู้ขาย)`
+          : 'ร้านตั้งค่าให้บังคับระบุผู้ขายทุกครั้ง — กรุณาเลือกหรือเพิ่มลูกค้าพร้อมเลขบัตรประชาชนก่อนบันทึก',
+      });
+      return;
+    }
+    if (
+      watchHits.length > 0 &&
+      !window.confirm(
+        `รายการนี้ตรงกับของต้องสงสัย: ${watchHits.join(', ')}\n\nอาจเป็นทรัพย์สินสาธารณะหรือของที่ถูกขโมย — ยืนยันว่าตรวจสอบที่มาของสินค้า${selectedCustomer ? '' : 'และควรบันทึกข้อมูลผู้ขาย'}แล้ว?`
+      )
+    ) {
+      return;
+    }
+    // Otherwise no customer selected genuinely means a walk-in sale, per the placeholder text
+    // above the customer search box.
     const cust = selectedCustomer || WALK_IN_CUSTOMER;
-    const receiptNo = 'RC' + Date.now().toString().slice(-9);
     const user = getStoredAuth();
     const timeStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
     // Built ahead of the actual save so the try block below can show it immediately once
@@ -435,7 +459,7 @@ export default function ScrapPurchase() {
     // a save that can still fail would pop up a "receipt" (printable, reprintable) for a sale
     // that was never actually recorded, right alongside the error banner from the catch below.
     const snapshot = {
-      no: receiptNo,
+      no: '',
       time: timeStr,
       date: todayThaiDate(),
       customerName: cust.name,
@@ -460,9 +484,10 @@ export default function ScrapPurchase() {
       vatIncluded: includeVat,
       vatAmount,
     };
+    // The server issues the sequential receipt number and hands it back here.
+    let receiptNo;
     try {
-      await addReceipt({
-        no: receiptNo,
+      const saved = await addReceipt({
         time: timeStr,
         cust: cust.name,
         // Receipts previously only stored the customer's name — voiding one had no reliable
@@ -484,6 +509,7 @@ export default function ScrapPurchase() {
         note: note.trim(),
         method: PAY_LABELS[payMethod],
         slipPhoto: payMethod === 'transfer' ? transferSlipPhoto : '',
+        goodsPhoto,
         vatIncluded: includeVat,
         vatAmount,
         items: rows.map((r) => ({
@@ -518,11 +544,12 @@ export default function ScrapPurchase() {
             .map((r) => ({ id: r.deductionReasonId, amount: rowDeductionWeight(r) })),
         ],
       });
+      receiptNo = saved.no;
     } catch (err) {
       setBanner({ type: 'error', text: err.message });
       return;
     }
-    setPrintSnapshot(snapshot);
+    setPrintSnapshot({ ...snapshot, no: receiptNo });
     // Record real usage against each deduction reason actually applied on this receipt —
     // both the overall reason and any per-row reasons — so the "ใช้แล้ว N ครั้ง" / ยอดหักรวม
     // figures on the หักน้ำหนัก/เหตุผล page reflect real weight-deducted activity, not frozen
@@ -565,7 +592,7 @@ export default function ScrapPurchase() {
             รับซื้อสินค้า <span>›</span> <b>เริ่มรับซื้อ</b>
           </div>
           <h1 className="page-title">
-            รับซื้อของเก่า <span className="receipt-tag">ฉบับร่าง · {draftNo}</span>
+            รับซื้อของเก่า <span className="receipt-tag">ฉบับร่าง · ออกเลขที่เมื่อบันทึก</span>
           </h1>
         </div>
         <div className="head-actions">
@@ -728,6 +755,7 @@ export default function ScrapPurchase() {
                   value={newCustIdNumber}
                   onChange={(e) => setNewCustIdNumber(e.target.value)}
                 />
+                <input type="text" placeholder="ที่อยู่ตามบัตรประชาชน (ไม่บังคับ)" value={newCustAddr} onChange={(e) => setNewCustAddr(e.target.value)} />
                 <div className="field">
                   <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>วันหมดอายุบัตรประชาชน</label>
                   <input type="date" className="input-plain" value={newCustIdExpiry} onChange={(e) => setNewCustIdExpiry(e.target.value)} />
@@ -753,7 +781,11 @@ export default function ScrapPurchase() {
                 </div>
               </div>
             ) : (
-              <div className="cust-empty">ยังไม่ได้เลือกลูกค้า — รายการนี้จะบันทึกเป็นลูกค้าขาจร</div>
+              <div className="cust-empty">
+                {settings.requireSeller
+                  ? 'ยังไม่ได้เลือกลูกค้า — ร้านตั้งค่าให้ต้องระบุผู้ขายพร้อมเลขบัตรประชาชนทุกครั้ง'
+                  : 'ยังไม่ได้เลือกลูกค้า — รายการนี้จะบันทึกเป็นลูกค้าขาจร'}
+              </div>
             )}
           </div>
 
@@ -1049,6 +1081,18 @@ export default function ScrapPurchase() {
               </div>
             </div>
 
+            <div style={{ marginTop: 14 }}>
+              <label className="pay-label">รูปสินค้าที่รับซื้อ (ไม่บังคับ — เก็บเป็นหลักฐาน)</label>
+              <IdPhotoCapture
+                value={goodsPhoto}
+                onChange={setGoodsPhoto}
+                onError={(msg) => setBanner({ type: 'error', text: msg })}
+                label="ถ่ายรูปสินค้า"
+                retakeLabel="ถ่ายรูปใหม่"
+                alt="รูปสินค้าที่รับซื้อ"
+              />
+            </div>
+
             {payMethod === 'transfer' && (
               <div style={{ marginTop: 14 }}>
                 <label className="pay-label">สลิปโอนเงิน (ไม่บังคับ)</label>
@@ -1060,6 +1104,12 @@ export default function ScrapPurchase() {
                   retakeLabel="แนบรูปใหม่"
                   alt="สลิปโอนเงิน"
                 />
+              </div>
+            )}
+
+            {watchHits.length > 0 && (
+              <div className="page-banner banner-error" style={{ marginBottom: 10 }}>
+                ⚠ ตรงกับของต้องสงสัย: {watchHits.join(', ')} — ตรวจสอบที่มาของสินค้า{selectedCustomer ? '' : ' และบันทึกข้อมูลผู้ขาย (เลขบัตรประชาชน)'} ก่อนรับซื้อ
               </div>
             )}
 
