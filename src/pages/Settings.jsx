@@ -180,6 +180,19 @@ export default function Settings() {
               </div>
               <button type="button" className={`switch${form.requireSeller ? ' on' : ''}`} onClick={() => setField('requireSeller', !form.requireSeller)}></button>
             </div>
+            <div className="field" style={{ marginTop: 12 }}>
+              <label>คำเตือนของต้องสงสัย (บรรทัดละคำ)</label>
+              <textarea
+                className="input-plain"
+                rows={6}
+                value={form.watchKeywords || ''}
+                onChange={(e) => setField('watchKeywords', e.target.value)}
+                placeholder="เช่น ฝาท่อ"
+              />
+              <div style={{ fontSize: 11, color: 'var(--ink-500)', marginTop: 4 }}>
+                ถ้าชื่อรายการหรือหมายเหตุตอนรับซื้อมีคำเหล่านี้ ระบบจะเตือนและให้ยืนยันก่อนบันทึก
+              </div>
+            </div>
           </div>
 
           <div className="card card-pad">
