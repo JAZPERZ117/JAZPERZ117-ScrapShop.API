@@ -32,6 +32,24 @@ export function storeAuth({ token, user }, remember) {
   }
 }
 
+// Every context calls fetch('/api/...') directly, so this one wrapper is the single place a
+// server-side session expiry (401) gets noticed. Without it, an expired token left the UI looking
+// signed in while every refresh and save quietly failed — no data syncing, no error shown.
+// Only acts when a token was actually sent: the login page's own pre-auth 401s are expected.
+export function installSessionExpiryRedirect() {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const res = await originalFetch(input, init);
+    const url = typeof input === 'string' ? input : input.url;
+    const isAuthEndpoint = url.startsWith('/api/login') || url.startsWith('/api/pin-login');
+    if (res.status === 401 && url.startsWith('/api/') && !isAuthEndpoint && getToken()) {
+      clearAuth();
+      window.location.assign('/login?expired=1');
+    }
+    return res;
+  };
+}
+
 export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
