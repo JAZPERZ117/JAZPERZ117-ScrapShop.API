@@ -369,4 +369,21 @@ db.exec(`
   );
 `);
 
+// Every manual stock correction (a physical count, moisture loss, theft, a typo fix) with who,
+// when, before/after and why — stock used to be a free-text field anyone could overwrite with
+// no trace.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS stock_adjustments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    before_kg REAL NOT NULL,
+    after_kg REAL NOT NULL,
+    reason TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;
