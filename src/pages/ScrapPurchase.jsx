@@ -6,6 +6,7 @@ import { useDeductions } from '../context/DeductionsContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useCategories } from '../context/CategoriesContext.jsx';
 import { useScales } from '../context/ScalesContext.jsx';
+import { useScaleReader } from '../context/ScaleReaderContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { getStoredAuth } from '../lib/auth.js';
 import { usePersistentState } from '../lib/persist.js';
@@ -94,6 +95,7 @@ export default function ScrapPurchase() {
   const { products, order: productOrder, addStock } = useProducts();
   const { categories } = useCategories();
   const { devices: scaleDevices, order: scaleOrder } = useScales();
+  const scaleReader = useScaleReader();
   const { settings } = useSettings();
 
   const mainScaleId = scaleOrder.find((id) => scaleDevices[id].active) || scaleOrder[0];
@@ -129,7 +131,6 @@ export default function ScrapPurchase() {
   const [rows, setRows] = useState([]);
 
   const [note, setNote] = useState('');
-  const [scaleReading, setScaleReading] = useState(0);
   const [payMethod, setPayMethod] = useState('cash');
   // Proof the shop actually transferred the money — only meaningful for โอนเงิน, so it's
   // only ever attached to (and included on) a receipt paid that way.
@@ -348,19 +349,27 @@ export default function ScrapPurchase() {
     }
   }
 
+  // Takes the live reading from the physical scale on this computer (ScaleReaderContext, Web
+  // Serial). This used to insert a random 2–42 kg "simulated" weight into a real purchase row
+  // that the customer then got paid for.
   function pullWeight() {
-    if (!mainScale || mainScale.status !== 'on') {
-      setBanner({ type: 'error', text: `${mainScale?.name || 'เครื่องชั่ง'} ไม่ได้เชื่อมต่ออยู่ — ไปที่หน้า "เครื่องชั่ง" เพื่อเชื่อมต่อก่อน` });
+    if (scaleReader.status !== 'connected' || !scaleReader.reading) {
+      setBanner({ type: 'error', text: 'ยังไม่ได้เชื่อมต่อเครื่องชั่งบนคอมเครื่องนี้ — ไปที่หน้า "เครื่องชั่ง" แล้วกด "เชื่อมต่อเครื่องชั่ง" หรือกรอกน้ำหนักเองในรายการ' });
       return;
     }
     if (rows.length === 0) {
       setBanner({ type: 'error', text: 'กรุณาเพิ่มรายการสินค้าก่อนดึงน้ำหนัก' });
       return;
     }
-    // No browser API can read a real digital scale, so this simulates a reading the same
-    // way the "(จำลอง)" button on the เครื่องชั่ง page does.
-    const val = Number((Math.random() * 40 + 2).toFixed(2));
-    setScaleReading(val);
+    if (!scaleReader.reading.stable) {
+      setBanner({ type: 'error', text: 'น้ำหนักบนเครื่องชั่งยังไม่นิ่ง — รอสักครู่แล้วกดอีกครั้ง' });
+      return;
+    }
+    const val = scaleReader.netWeight;
+    if (!(val > 0)) {
+      setBanner({ type: 'error', text: 'เครื่องชั่งอ่านได้ 0 กก. หรือติดลบ — วางของบนเครื่องชั่งก่อน (หรือตรวจการตั้งศูนย์)' });
+      return;
+    }
     setRows((prev) => {
       const next = [...prev];
       next[next.length - 1] = { ...next[next.length - 1], weight: val.toFixed(2) };
@@ -372,7 +381,6 @@ export default function ScrapPurchase() {
     setSelectedCustomer(null);
     setRows([]);
     setNote('');
-    setScaleReading(0);
     setDeductionWeight('');
     setDeductionReasonId('');
     setCustomReason('');
@@ -899,12 +907,18 @@ export default function ScrapPurchase() {
                 <div>
                   <div className="scale-label">น้ำหนักจากเครื่องชั่งดิจิทัล ({mainScale?.name || '—'})</div>
                   <div className="scale-reading">
-                    {scaleReading.toFixed(2)}
+                    {scaleReader.netWeight.toFixed(2)}
                     <span className="u">กก.</span>
                   </div>
                   <div className="scale-status">
-                    <span className="scale-dot" style={{ background: mainScale?.status === 'on' ? undefined : 'var(--ink-300)' }}></span>
-                    {mainScale?.status === 'on' ? 'เชื่อมต่อแล้ว' : 'ไม่ได้เชื่อมต่อ'} · พอร์ต {mainScale?.port || '—'}
+                    <span className="scale-dot" style={{ background: scaleReader.status === 'connected' ? undefined : 'var(--ink-300)' }}></span>
+                    {scaleReader.status === 'connected'
+                      ? scaleReader.reading?.stable === false
+                        ? 'เชื่อมต่อแล้ว · น้ำหนักยังไม่นิ่ง'
+                        : 'เชื่อมต่อแล้ว · อ่านค่าจากเครื่องจริง'
+                      : scaleReader.supported
+                        ? 'ยังไม่ได้เชื่อมต่อ — เชื่อมต่อได้ที่หน้าเครื่องชั่ง'
+                        : 'เบราว์เซอร์นี้ต่อเครื่องชั่งไม่ได้ — กรอกน้ำหนักเอง'}
                   </div>
                 </div>
               </div>
@@ -912,10 +926,11 @@ export default function ScrapPurchase() {
                 type="button"
                 className="btn-scale"
                 onClick={pullWeight}
-                title="เว็บเบราว์เซอร์เชื่อมต่อกับเครื่องชั่งจริงโดยตรงไม่ได้ ปุ่มนี้จึงจำลองค่าน้ำหนักให้แทน — กรอกน้ำหนักที่ชั่งได้จริงด้วยตัวเองในช่องด้านบนแทนได้เสมอ"
+                disabled={scaleReader.status !== 'connected'}
+                title="นำน้ำหนักที่เครื่องชั่งอ่านได้ตอนนี้ใส่ในรายการล่าสุด — กรอกน้ำหนักเองในรายการได้เสมอ"
               >
                 <IconRefresh />
-                ดึงน้ำหนักเข้ารายการ (จำลอง)
+                ดึงน้ำหนักเข้ารายการ
               </button>
             </div>
 

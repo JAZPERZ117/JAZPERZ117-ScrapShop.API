@@ -3,8 +3,9 @@ import { useDeliveries } from '../context/DeliveriesContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { exportCsv } from '../lib/csvExport.js';
+import { signedMoney } from '../lib/finance.js';
 import RowMenu from '../components/RowMenu.jsx';
-import { IconTruck, IconPlus, IconTrash, IconX, IconCheck, IconPrint, IconDownload, IconClockHistory, IconEdit } from '../icons.jsx';
+import { IconTruck, IconPlus, IconTrash, IconX, IconCheck, IconPrint, IconDownload, IconClockHistory, IconEdit, IconCash } from '../icons.jsx';
 import './Deliveries.css';
 
 let nextRowId = 1;
@@ -23,6 +24,20 @@ function formatThaiDate(iso) {
 function nowTimeStr() {
   return new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
 }
+// Local date (not toISOString/UTC) for the "received on" default.
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// What the buyer owes for a shipment: the printed ใบส่งสินค้า/ใบกำกับภาษี adds 7% VAT on top of
+// the item amounts, so the receivable is that grand total, not the pre-VAT subtotal.
+function invoiceTotal(d) {
+  return (d.totalAmount || 0) * 1.07;
+}
+
+const PAID_METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', cheque: 'เช็ค' };
+
 function makeDeliveryNo() {
   return 'DO' + Date.now().toString().slice(-9);
 }
@@ -66,7 +81,7 @@ function bahtText(amount) {
 }
 
 export default function Deliveries() {
-  const { deliveries, order, addDelivery, updateDelivery, deleteDelivery, markDelivered } = useDeliveries();
+  const { deliveries, order, addDelivery, updateDelivery, deleteDelivery, markDelivered, recordPayment } = useDeliveries();
   const { products, order: productOrder, addStock, addStockById, removeStock } = useProducts();
   const { settings } = useSettings();
 
@@ -83,6 +98,7 @@ export default function Deliveries() {
   const [filter, setFilter] = useState('all');
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState(null);
+  const [payForm, setPayForm] = useState(null);
 
   // Only products with real stock on hand can go out on a delivery.
   const availableProductIds = productOrder.filter((id) => products[id].active && parseStockKg(products[id].stock) > 0);
@@ -196,6 +212,7 @@ export default function Deliveries() {
 
   function selectRow(id) {
     if (isEditing && id !== editForm?.id) setIsEditing(false);
+    if (id !== selectedId) setPayForm(null);
     setSelectedId(id);
   }
 
@@ -374,6 +391,7 @@ export default function Deliveries() {
     return order.filter((id) => {
       if (filter === 'pending' && deliveries[id].status !== 'pending') return false;
       if (filter === 'delivered' && deliveries[id].status !== 'delivered') return false;
+      if (filter === 'unpaid' && deliveries[id].paidDate) return false;
       return true;
     });
   }, [order, deliveries, filter]);
@@ -382,6 +400,31 @@ export default function Deliveries() {
   const deliveredCount = order.length - pendingCount;
   const totalWeightShipped = order.reduce((s, id) => s + (deliveries[id].totalWeight || 0), 0);
   const totalAmountShipped = order.reduce((s, id) => s + (deliveries[id].totalAmount || 0), 0);
+  const unpaidIds = order.filter((id) => !deliveries[id].paidDate);
+  const receivable = unpaidIds.reduce((s, id) => s + invoiceTotal(deliveries[id]), 0);
+
+  async function handleRecordPayment(e) {
+    e.preventDefault();
+    try {
+      await recordPayment(selectedId, { paidAmount: parseFloat(payForm.amount), paidDate: payForm.date, paidMethod: payForm.method });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    setBanner({ type: 'success', text: `บันทึกรับเงินใบส่งของ ${selectedId} จำนวน ${money(parseFloat(payForm.amount))} แล้ว` });
+    setPayForm(null);
+  }
+
+  async function handleUndoPayment() {
+    if (!window.confirm(`ยกเลิกการบันทึกรับเงินของใบส่งของ ${selectedId}? รายการจะกลับเป็น "ค้างรับเงิน"`)) return;
+    try {
+      await recordPayment(selectedId, { paid: false });
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message });
+      return;
+    }
+    setBanner({ type: 'success', text: `ยกเลิกการรับเงินของใบส่งของ ${selectedId} แล้ว` });
+  }
 
   const selected = selectedId ? deliveries[selectedId] : null;
   // Thai tax invoices show VAT as a separate line on top of item prices (which are treated
@@ -394,10 +437,10 @@ export default function Deliveries() {
   function handleExport() {
     exportCsv(
       'deliveries.csv',
-      ['เลขที่ใบส่งของ', 'วันที่', 'ผู้รับซื้อปลายทาง', 'น้ำหนักรวม', 'มูลค่ารวม', 'สถานะ'],
+      ['เลขที่ใบส่งของ', 'วันที่', 'ผู้รับซื้อปลายทาง', 'น้ำหนักรวม', 'มูลค่ารวม', 'สถานะ', 'ยอดตามใบกำกับ (รวม VAT)', 'รับเงินแล้ว', 'วันที่รับเงิน', 'วิธีรับเงิน'],
       order.map((id) => {
         const d = deliveries[id];
-        return [d.no, d.date, d.buyerName, `${d.totalWeight.toFixed(2)} กก.`, d.totalAmount.toFixed(2), d.status === 'delivered' ? 'ส่งถึงแล้ว' : 'รอส่งถึง'];
+        return [d.no, d.date, d.buyerName, `${d.totalWeight.toFixed(2)} กก.`, d.totalAmount.toFixed(2), d.status === 'delivered' ? 'ส่งถึงแล้ว' : 'รอส่งถึง', invoiceTotal(d).toFixed(2), d.paidDate ? d.paidAmount.toFixed(2) : '', d.paidDate, PAID_METHOD_LABELS[d.paidMethod] || ''];
       })
     );
   }
@@ -451,17 +494,17 @@ export default function Deliveries() {
           <div>
             <div className="stat-label">รอส่งถึง</div>
             <div className="stat-value">{pendingCount} ใบ</div>
-            <div className="stat-foot">ยังไม่ยืนยันส่งถึงปลายทาง</div>
+            <div className="stat-foot">ส่งถึงแล้ว {deliveredCount} ใบ</div>
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'var(--blue-bg)', color: 'var(--blue)' }}>
-            <IconCheck />
+          <div className="stat-icon" style={{ background: 'var(--rose-bg)', color: 'var(--rose)' }}>
+            <IconCash />
           </div>
           <div>
-            <div className="stat-label">ส่งถึงแล้ว</div>
-            <div className="stat-value">{deliveredCount} ใบ</div>
-            <div className="stat-foot">ยืนยันรับของแล้ว</div>
+            <div className="stat-label">เงินค้างรับจากผู้รับซื้อ</div>
+            <div className="stat-value">{money(receivable)}</div>
+            <div className="stat-foot">{unpaidIds.length} ใบยังไม่ได้รับเงิน (รวม VAT)</div>
           </div>
         </div>
         <div className="stat-card">
@@ -605,6 +648,7 @@ export default function Deliveries() {
                 ['all', 'ทั้งหมด'],
                 ['pending', 'รอส่งถึง'],
                 ['delivered', 'ส่งถึงแล้ว'],
+                ['unpaid', 'ค้างรับเงิน'],
               ].map(([key, label]) => (
                 <button key={key} type="button" className={`filter-tab${filter === key ? ' active' : ''}`} onClick={() => setFilter(key)}>
                   {label}
@@ -654,6 +698,9 @@ export default function Deliveries() {
                       ) : (
                         <span className="badge badge-neutral">รอส่งถึง</span>
                       )}
+                      <div style={{ marginTop: 4 }}>
+                        {d.paidDate ? <span className="badge badge-blue">รับเงินแล้ว</span> : <span className="badge badge-amber">ค้างรับเงิน</span>}
+                      </div>
                     </td>
                     <td>
                       <RowMenu
@@ -853,6 +900,77 @@ export default function Deliveries() {
                 </div>
               ) : (
                 <div className="receipt-actions">
+                  <div className="card card-pad" style={{ marginBottom: 10 }}>
+                    <div className="card-title" style={{ marginBottom: 10 }}>
+                      <IconCash />
+                      การรับเงินจากผู้รับซื้อ
+                    </div>
+                    <div className="sum-row">
+                      <span className="label">ยอดตามใบกำกับ (รวม VAT)</span>
+                      <span className="val">{money(invoiceTotal(selected))}</span>
+                    </div>
+                    {selected.paidDate ? (
+                      <>
+                        <div className="sum-row">
+                          <span className="label">
+                            รับเงินแล้ว · {formatThaiDate(selected.paidDate)} · {PAID_METHOD_LABELS[selected.paidMethod] || selected.paidMethod}
+                          </span>
+                          <span className="val">{money(selected.paidAmount)}</span>
+                        </div>
+                        {Math.abs(selected.paidAmount - invoiceTotal(selected)) >= 0.01 && (
+                          <div className="sum-row">
+                            <span className="label">ส่วนต่าง (เช่น โรงงานชั่งใหม่)</span>
+                            <span className="val">{signedMoney(selected.paidAmount - invoiceTotal(selected))}</span>
+                          </div>
+                        )}
+                        <button type="button" className="btn btn-ghost btn-block" onClick={handleUndoPayment}>
+                          <IconX />
+                          ยกเลิกการรับเงิน
+                        </button>
+                      </>
+                    ) : payForm ? (
+                      <form onSubmit={handleRecordPayment}>
+                        <div className="field-row">
+                          <div className="field" style={{ flex: 1 }}>
+                            <label>จำนวนที่ได้รับ</label>
+                            <input type="number" min="0.01" step="0.01" className="input-plain" value={payForm.amount} onChange={(e) => setPayForm((p) => ({ ...p, amount: e.target.value }))} required />
+                          </div>
+                          <div className="field" style={{ flex: 1 }}>
+                            <label>วันที่รับ</label>
+                            <input type="date" className="input-plain" value={payForm.date} max={todayISO()} onChange={(e) => setPayForm((p) => ({ ...p, date: e.target.value }))} required />
+                          </div>
+                        </div>
+                        <div className="field">
+                          <label>วิธีรับเงิน</label>
+                          <select className="input-plain" value={payForm.method} onChange={(e) => setPayForm((p) => ({ ...p, method: e.target.value }))}>
+                            {Object.entries(PAID_METHOD_LABELS).map(([k, label]) => (
+                              <option key={k} value={k}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="action-row">
+                          <button type="submit" className="btn btn-primary">
+                            <IconCheck />
+                            บันทึกรับเงิน
+                          </button>
+                          <button type="button" className="btn btn-ghost" onClick={() => setPayForm(null)}>
+                            ยกเลิก
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-block"
+                        onClick={() => setPayForm({ amount: invoiceTotal(selected).toFixed(2), date: todayISO(), method: 'transfer' })}
+                      >
+                        <IconCash />
+                        บันทึกรับเงินจากผู้รับซื้อ
+                      </button>
+                    )}
+                  </div>
                   <button type="button" className="btn btn-primary btn-block" onClick={() => window.print()}>
                     <IconPrint />
                     พิมพ์ใบส่งของ
