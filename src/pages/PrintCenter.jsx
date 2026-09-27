@@ -22,7 +22,8 @@ import { useCategories } from '../context/CategoriesContext.jsx';
 import { useCustomers } from '../context/CustomersContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useDeliveries } from '../context/DeliveriesContext.jsx';
-import { sumSales, signedMoney, estimateTax, EXPENSE_METHOD_LABELS } from '../lib/finance.js';
+import { useExpenses } from '../context/ExpensesContext.jsx';
+import { sumSales, sumExpenses, signedMoney, estimateTax, EXPENSE_METHOD_LABELS } from '../lib/finance.js';
 import './PrintCenter.css';
 
 const PAY_METHOD_LABELS = { cash: 'เงินสด', transfer: 'โอนเงิน', promptpay: 'พร้อมเพย์' };
@@ -119,6 +120,7 @@ export default function PrintCenter() {
   const { customers, order: customerOrder } = useCustomers();
   const { settings } = useSettings();
   const { deliveries, order: deliveryOrder } = useDeliveries();
+  const { expenses, order: expenseOrder } = useExpenses();
 
   // Every receipt now carries a real date, so each month's figures below are computed
   // directly from actual data instead of a "historical demo months + real current month"
@@ -610,7 +612,8 @@ export default function PrintCenter() {
       .filter((p) => p.payMethod === 'cash' && isToday(p.paidAt))
       .reduce((sum, p) => sum + (p.net || 0), 0);
     // Both are cash going out of the drawer — their sum, not their difference.
-    const cashOut = cashFromPurchases + cashPaidToStaff;
+    const cashExpensesToday = sumExpenses(expenses, expenseOrder, (date) => date === todayISO(), true);
+    const cashOut = cashFromPurchases + cashPaidToStaff + cashExpensesToday;
     const salesToday = sumSales(deliveries, deliveryOrder, (date) => date === todayISO());
     return (
       <div className="a4-doc">
@@ -647,6 +650,10 @@ export default function PrintCenter() {
             <span>จ่ายเงินเดือนด้วยเงินสด</span>
             <b>−{money(cashPaidToStaff)}</b>
           </div>
+          <div className="a4-doc-sum-row minus">
+            <span>ค่าใช้จ่ายร้านด้วยเงินสด</span>
+            <b>−{money(cashExpensesToday)}</b>
+          </div>
           <div className="a4-doc-sum-row">
             <span>รวมเงินสดจ่ายออกวันนี้</span>
             <b>−{money(cashOut)}</b>
@@ -677,7 +684,8 @@ export default function PrintCenter() {
         return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
       })
       .reduce((s, p) => s + (p.net || 0), 0);
-    const netProfit = monthSales - monthTotal - wagesPaid;
+    const monthExpenses = sumExpenses(expenses, expenseOrder, (date) => date.startsWith(monthKey));
+    const netProfit = monthSales - monthTotal - wagesPaid - monthExpenses;
     return (
       <div className="a4-doc">
         {renderA4Top(`รายงานประจำเดือน · ${THIS_MONTH_THAI_LONG}`)}
@@ -713,6 +721,10 @@ export default function PrintCenter() {
             <span>เงินเดือนที่จ่ายไปแล้ว</span>
             <b>−{money(wagesPaid)}</b>
           </div>
+          <div className="a4-doc-sum-row minus">
+            <span>ค่าใช้จ่ายร้าน</span>
+            <b>−{money(monthExpenses)}</b>
+          </div>
           <div className="a4-doc-sum-row">
             <span>กำไรสุทธิเดือนนี้</span>
             <b>{signedMoney(netProfit)}</b>
@@ -746,9 +758,13 @@ export default function PrintCenter() {
         return d.getFullYear() === year && d.getMonth() <= lastMonthIndex;
       })
       .reduce((s, p) => s + (p.net || 0), 0);
+    const shopExpenses = sumExpenses(expenses, expenseOrder, (date) => {
+      const [y, m] = date.split('-').map(Number);
+      return y === year && m - 1 <= lastMonthIndex;
+    });
     const { expenseDeduct, personalDeduct, netIncome, tax: estimatedTax } = estimateTax({
       income: totalIncome,
-      actualExpenses: totalPurchases + wagesPaid,
+      actualExpenses: totalPurchases + wagesPaid + shopExpenses,
       method: taxExpenseMethod,
       isHalfYear,
     });

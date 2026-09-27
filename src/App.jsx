@@ -11,6 +11,7 @@ import Categories from './pages/Categories.jsx';
 import Deductions from './pages/Deductions.jsx';
 import Scales from './pages/Scales.jsx';
 import Deliveries from './pages/Deliveries.jsx';
+import Expenses from './pages/Expenses.jsx';
 import PrintCenter from './pages/PrintCenter.jsx';
 import DailySummary from './pages/DailySummary.jsx';
 import MonthlyReport from './pages/MonthlyReport.jsx';
@@ -33,6 +34,7 @@ import { UsersProvider } from './context/UsersContext.jsx';
 import { SettingsProvider } from './context/SettingsContext.jsx';
 import { PrintersProvider } from './context/PrintersContext.jsx';
 import { DeliveriesProvider } from './context/DeliveriesContext.jsx';
+import { ExpensesProvider } from './context/ExpensesContext.jsx';
 
 function ProtectedRoute({ children }) {
   const user = getStoredAuth();
@@ -74,6 +76,7 @@ export default function App() {
     <SettingsProvider>
     <PrintersProvider>
     <DeliveriesProvider>
+    <ExpensesProvider>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route
@@ -93,6 +96,7 @@ export default function App() {
         <Route path="deductions" element={<RoleRoute permKey="deductions"><Deductions /></RoleRoute>} />
         <Route path="scales" element={<RoleRoute permKey="scales"><Scales /></RoleRoute>} />
         <Route path="deliveries" element={<RoleRoute permKey="deliveries"><Deliveries /></RoleRoute>} />
+        <Route path="expenses" element={<RoleRoute permKey="expenses"><Expenses /></RoleRoute>} />
         <Route path="print-center" element={<RoleRoute permKey="print-center"><PrintCenter /></RoleRoute>} />
         <Route path="daily-summary" element={<RoleRoute permKey="daily-summary"><DailySummary /></RoleRoute>} />
         <Route path="monthly-report" element={<RoleRoute permKey="monthly-report"><MonthlyReport /></RoleRoute>} />
@@ -106,6 +110,7 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </ExpensesProvider>
     </DeliveriesProvider>
     </PrintersProvider>
     </SettingsProvider>
