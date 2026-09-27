@@ -1096,6 +1096,38 @@ app.delete('/api/categories/:id', requireAuth, requireMenu('categories'), (req, 
   res.json({ ok: true });
 });
 
+function toApiCashCount(row) {
+  return {
+    date: row.date,
+    openingFloat: row.opening_float,
+    countedCash: row.counted_cash,
+    note: row.note,
+    updatedBy: row.updated_by,
+    updatedAt: row.updated_at,
+  };
+}
+
+app.get('/api/cash-counts', requireAuth, (req, res) => {
+  const rows = db.prepare('SELECT * FROM cash_counts ORDER BY date DESC').all();
+  res.json({ cashCounts: rows.map(toApiCashCount) });
+});
+
+// Upsert one day's drawer count. countedCash may be null (opened, not yet counted at close).
+app.put('/api/cash-counts/:date', requireAuth, requireMenu('daily-summary'), (req, res) => {
+  const date = req.params.date;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'วันที่ไม่ถูกต้อง' });
+  const b = req.body || {};
+  const openingFloat = Number(b.openingFloat);
+  if (!(openingFloat >= 0)) return res.status(400).json({ error: 'กรุณากรอกเงินทอนตั้งต้นเป็นตัวเลข 0 ขึ้นไป' });
+  const counted = b.countedCash === null || b.countedCash === undefined || b.countedCash === '' ? null : Number(b.countedCash);
+  if (counted !== null && !(counted >= 0)) return res.status(400).json({ error: 'กรุณากรอกเงินสดที่นับได้เป็นตัวเลข 0 ขึ้นไป' });
+  db.prepare(
+    `INSERT INTO cash_counts (date, opening_float, counted_cash, note, updated_by, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'))
+     ON CONFLICT(date) DO UPDATE SET opening_float = excluded.opening_float, counted_cash = excluded.counted_cash, note = excluded.note, updated_by = excluded.updated_by, updated_at = excluded.updated_at`
+  ).run(date, openingFloat, counted, String(b.note || '').trim(), req.authUser.username || '');
+  res.json({ cashCount: toApiCashCount(db.prepare('SELECT * FROM cash_counts WHERE date = ?').get(date)) });
+});
+
 function toApiExpense(row) {
   return {
     id: row.id,
