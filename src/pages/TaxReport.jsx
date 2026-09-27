@@ -5,7 +5,8 @@ import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useDeliveries } from '../context/DeliveriesContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
-import { estimateTax, EXPENSE_METHOD_LABELS } from '../lib/finance.js';
+import { useExpenses } from '../context/ExpensesContext.jsx';
+import { estimateTax, sumExpenses, EXPENSE_METHOD_LABELS } from '../lib/finance.js';
 import './TaxReport.css';
 
 const TAX_YEAR_BE = new Date().getFullYear() + 543;
@@ -34,6 +35,7 @@ export default function TaxReport() {
   const { receipts, order: receiptOrder } = useReceipts();
   const { deliveries, order: deliveryOrder } = useDeliveries();
   const { payHistory } = usePayroll();
+  const { expenses, order: expenseOrder } = useExpenses();
   const { settings } = useSettings();
 
   // Every receipt now carries a real date, so each month's row is computed directly from
@@ -82,9 +84,13 @@ export default function TaxReport() {
       return d.getFullYear() === currentYear && d.getMonth() <= lastMonthIndex;
     })
     .reduce((s, p) => s + (p.net || 0), 0);
+  const shopExpenses = sumExpenses(expenses, expenseOrder, (date) => {
+    const [y, m] = date.split('-').map(Number);
+    return y === currentYear && m - 1 <= lastMonthIndex;
+  });
   const { expenseDeduct, personalDeduct, netIncome, tax: estimatedTax } = estimateTax({
     income: totalIncome,
-    actualExpenses: totalPurchases + wagesPaid,
+    actualExpenses: totalPurchases + wagesPaid + shopExpenses,
     method: expenseMethod,
     isHalfYear,
   });
@@ -147,7 +153,7 @@ export default function TaxReport() {
           <div>
             <div className="stat-label">{expenseLabel}</div>
             <div className="stat-value">{money(expenseDeduct)}</div>
-            <div className="stat-foot">{expenseMethod === 'actual' ? 'ต้นทุนรับซื้อ + เงินเดือน' : 'เหมาจ่ายตามประเภทเงินได้'}</div>
+            <div className="stat-foot">{expenseMethod === 'actual' ? 'ต้นทุนรับซื้อ + เงินเดือน + ค่าใช้จ่ายร้าน' : 'เหมาจ่ายตามประเภทเงินได้'}</div>
           </div>
         </div>
         <div className="stat-card">

@@ -7,7 +7,8 @@ import { useProducts } from '../context/ProductsContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
 import { useDeliveries } from '../context/DeliveriesContext.jsx';
-import { sumSales, signedMoney } from '../lib/finance.js';
+import { useExpenses } from '../context/ExpensesContext.jsx';
+import { sumSales, sumExpenses, signedMoney } from '../lib/finance.js';
 import './DailySummary.css';
 
 function parseMoney(s) {
@@ -84,6 +85,7 @@ export default function DailySummary() {
   const { payHistory } = usePayroll();
   const { settings } = useSettings();
   const { deliveries, order: deliveryOrder } = useDeliveries();
+  const { expenses, order: expenseOrder } = useExpenses();
   const [selectedDate, setSelectedDate] = useState(todayISO);
   const dateLabel = thaiLongDate(selectedDate);
 
@@ -94,7 +96,8 @@ export default function DailySummary() {
   const totalWeightToday = activeReceipts.reduce((sum, id) => sum + parseWeightKg(receipts[id].weight), 0);
   const salesToday = sumSales(deliveries, deliveryOrder, (date) => date === selectedDate);
   const wagesPaidToday = payHistory.filter((p) => localDateKey(p.paidAt) === selectedDate).reduce((sum, p) => sum + (p.net || 0), 0);
-  const grossProfitToday = salesToday - totalToday - wagesPaidToday;
+  const expensesToday = sumExpenses(expenses, expenseOrder, (date) => date === selectedDate);
+  const grossProfitToday = salesToday - totalToday - wagesPaidToday - expensesToday;
 
   // Both of these are money going OUT of the drawer, so the day's cash outflow is their sum —
   // it used to subtract one from the other, which doesn't correspond to any real cash figure.
@@ -104,7 +107,8 @@ export default function DailySummary() {
   const cashPaidToStaff = payHistory
     .filter((p) => p.payMethod === 'cash' && localDateKey(p.paidAt) === selectedDate)
     .reduce((sum, p) => sum + (p.net || 0), 0);
-  const cashOut = cashFromPurchases + cashPaidToStaff;
+  const cashExpensesToday = sumExpenses(expenses, expenseOrder, (date) => date === selectedDate, true);
+  const cashOut = cashFromPurchases + cashPaidToStaff + cashExpensesToday;
 
   // Hour-of-day buckets computed from each receipt's real recorded time.
   const hourBuckets = useMemo(() => {
@@ -232,10 +236,10 @@ export default function DailySummary() {
             <IconBarChart />
           </div>
           <div>
-            <div className="stat-label">กำไรขั้นต้นวันนี้</div>
+            <div className="stat-label">กำไรวันนี้</div>
             <div className="stat-value" style={{ color: grossProfitToday < 0 ? 'var(--rose)' : undefined }}>{signedMoney(grossProfitToday)}</div>
             <div className="stat-foot" style={{ color: 'var(--ink-500)' }}>
-              ขาย {money(salesToday)} − รับซื้อ − ค่าแรง
+              ขาย {money(salesToday)} − รับซื้อ − ค่าแรง − ค่าใช้จ่าย
             </div>
           </div>
         </div>
@@ -334,6 +338,10 @@ export default function DailySummary() {
               <span className="label">จ่ายเงินเดือนด้วยเงินสด</span>
               <span className="val minus">−{money(cashPaidToStaff)}</span>
             </div>
+            <div className="sum-row">
+              <span className="label">ค่าใช้จ่ายร้านด้วยเงินสด</span>
+              <span className="val minus">−{money(cashExpensesToday)}</span>
+            </div>
             <div className="grand-total">
               <span className="label">รวมเงินสดจ่ายออก</span>
               <span className="val">−{money(cashOut)}</span>
@@ -428,7 +436,7 @@ export default function DailySummary() {
               <b>{money(salesToday)}</b>
             </div>
             <div className="a4-doc-sum-row">
-              <span>กำไรขั้นต้น (ขาย − รับซื้อ − ค่าแรง)</span>
+              <span>กำไรวันนี้ (ขาย − รับซื้อ − ค่าแรง − ค่าใช้จ่าย)</span>
               <b>{signedMoney(grossProfitToday)}</b>
             </div>
             <div className="a4-doc-sum-row minus">
@@ -438,6 +446,10 @@ export default function DailySummary() {
             <div className="a4-doc-sum-row minus">
               <span>จ่ายเงินเดือนด้วยเงินสด</span>
               <b>−{money(cashPaidToStaff)}</b>
+            </div>
+            <div className="a4-doc-sum-row minus">
+              <span>ค่าใช้จ่ายร้านด้วยเงินสด</span>
+              <b>−{money(cashExpensesToday)}</b>
             </div>
             <div className="a4-doc-grand">
               <span>รวมเงินสดจ่ายออก</span>

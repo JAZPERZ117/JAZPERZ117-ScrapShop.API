@@ -306,4 +306,20 @@ db.exec(`
   );
 `);
 
+// Running costs of the shop itself (electricity, fuel, rent, repairs...) — separate from buying
+// scrap in (receipts) and from wages (pay_history), and deducted alongside both when reports
+// compute net profit and "actual cost" taxable income.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS expenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    category TEXT NOT NULL,
+    amount REAL NOT NULL,
+    pay_method TEXT NOT NULL DEFAULT 'cash',
+    note TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;
