@@ -4,6 +4,8 @@ import { exportCsv } from '../lib/csvExport.js';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
+import { useDeliveries } from '../context/DeliveriesContext.jsx';
+import { signedMoney } from '../lib/finance.js';
 import './ProductReport.css';
 
 const DONUT_COLORS = ['#B8720A', '#2D6FE0', '#8B4FD8', '#0E8E82', '#D8477A', '#5B6B77'];
@@ -58,6 +60,7 @@ export default function ProductReport() {
   const { settings } = useSettings();
   const [sortBy, setSortBy] = useState('amt');
 
+  const { deliveries, order: deliveryOrder } = useDeliveries();
   const productIds = Object.keys(products);
   const totalStock = productIds.reduce((sum, id) => sum + parseStockKg(products[id].stock), 0);
   const categoryCount = new Set(productIds.map((id) => products[id].cat)).size;
@@ -76,6 +79,36 @@ export default function ProductReport() {
     }
     return byName;
   }, [receipts, receiptOrder]);
+
+  // What each product actually sold for (Deliveries), matched by product id where the delivery
+  // recorded one, else by name for older deliveries.
+  const salesByName = useMemo(() => {
+    const byName = {};
+    for (const no of deliveryOrder) {
+      for (const it of deliveries[no].items || []) {
+        const name = (it.productId && products[it.productId]?.name) || it.name;
+        if (!byName[name]) byName[name] = { amt: 0, weight: 0 };
+        byName[name].amt += it.amount || 0;
+        byName[name].weight += it.weight || 0;
+      }
+    }
+    return byName;
+  }, [deliveries, deliveryOrder, products]);
+
+  // Average buy price vs average sell price per kg — the margin a scrap shop actually lives on.
+  // Only products with both sides can show a margin; the others show what's missing.
+  const margins = productIds
+    .map((id) => {
+      const p = products[id];
+      const buy = revenueByName[p.name] || { amt: 0, weight: 0 };
+      const sell = salesByName[p.name] || { amt: 0, weight: 0 };
+      const avgBuy = buy.weight > 0 ? buy.amt / buy.weight : null;
+      const avgSell = sell.weight > 0 ? sell.amt / sell.weight : null;
+      const perKg = avgBuy !== null && avgSell !== null ? avgSell - avgBuy : null;
+      return { id, name: p.name, bg: p.bg, fg: p.fg, Icon: p.Icon, avgBuy, avgSell, perKg, pct: perKg !== null && avgBuy > 0 ? (perKg / avgBuy) * 100 : null, soldKg: sell.weight };
+    })
+    .filter((m) => m.avgBuy !== null || m.avgSell !== null)
+    .sort((a, b) => (b.pct ?? -Infinity) - (a.pct ?? -Infinity));
 
   const rank = useMemo(() => {
     const rows = productIds.map((id) => {
@@ -165,7 +198,7 @@ export default function ProductReport() {
             <IconMagnet />
           </div>
           <div>
-            <div className="stat-label">สินค้าขายดีที่สุด</div>
+            <div className="stat-label">สินค้าที่รับซื้อมากที่สุด</div>
             <div className="stat-value">{bestSeller?.amt > 0 ? bestSeller.name : '—'}</div>
             <div className="stat-foot" style={{ color: 'var(--ink-500)' }}>
               {money(bestSeller?.amt || 0)} สะสม
@@ -217,7 +250,7 @@ export default function ProductReport() {
               <div>
                 <div className="card-title">
                   <IconProductReport />
-                  อันดับสินค้าขายดี
+                  อันดับสินค้าที่รับซื้อ
                 </div>
                 <div className="card-sub">เรียงตามยอดรับซื้อสะสม</div>
               </div>
@@ -268,6 +301,53 @@ export default function ProductReport() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          <div className="card card-pad section-gap">
+            <div className="card-head">
+              <div>
+                <div className="card-title">
+                  <IconTrendUp />
+                  กำไรต่อชนิดสินค้า
+                </div>
+                <div className="card-sub">ราคาขายเฉลี่ยให้ผู้รับซื้อ เทียบราคารับซื้อเฉลี่ย ต่อ กก. (ข้อมูลสะสมทั้งหมด)</div>
+              </div>
+            </div>
+            {margins.length === 0 ? (
+              <div className="empty-hint">ยังไม่มีข้อมูลการรับซื้อหรือการส่งขาย</div>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: '28%' }}>สินค้า</th>
+                    <th style={{ width: '16%' }}>ซื้อเฉลี่ย/กก.</th>
+                    <th style={{ width: '16%' }}>ขายเฉลี่ย/กก.</th>
+                    <th style={{ width: '16%' }}>ส่วนต่าง/กก.</th>
+                    <th style={{ width: '10%' }}>% กำไร</th>
+                    <th style={{ width: '14%' }}>ส่งขายแล้ว</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {margins.map((m) => (
+                    <tr key={m.id}>
+                      <td>
+                        <div className="row-cell">
+                          <div className="row-icon" style={{ background: m.bg, color: m.fg }}>
+                            <m.Icon />
+                          </div>
+                          <div className="row-name">{m.name}</div>
+                        </div>
+                      </td>
+                      <td className="num-cell">{m.avgBuy !== null ? money(m.avgBuy) : '—'}</td>
+                      <td className="num-cell">{m.avgSell !== null ? money(m.avgSell) : 'ยังไม่เคยส่งขาย'}</td>
+                      <td className="num-cell" style={{ color: m.perKg < 0 ? 'var(--rose)' : undefined }}>{m.perKg !== null ? signedMoney(m.perKg) : '—'}</td>
+                      <td className="num-cell" style={{ color: m.pct < 0 ? 'var(--rose)' : undefined }}>{m.pct !== null ? `${m.pct.toFixed(1)}%` : '—'}</td>
+                      <td className="num-cell">{m.soldKg.toLocaleString('th-TH')} กก.</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
 
           <div className="card card-pad">
