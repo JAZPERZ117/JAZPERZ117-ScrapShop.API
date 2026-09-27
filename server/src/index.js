@@ -465,13 +465,50 @@ app.put('/api/products/:id', requireAuth, requireMenu('products'), (req, res) =>
   const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
   const body = req.body || {};
-  db.prepare('UPDATE products SET name = ?, cat = ?, stock = ?, active = ? WHERE id = ?').run(
-    body.name !== undefined ? body.name.trim() || row.name : row.name,
+  // Stock is deliberately NOT editable here any more — manual corrections go through
+  // POST /api/products/:id/adjust-stock below so each one is logged with a reason.
+  db.prepare('UPDATE products SET name = ?, cat = ?, active = ? WHERE id = ?').run(
+    body.name !== undefined ? body.name?.trim() || row.name : row.name,
     body.cat !== undefined ? body.cat : row.cat,
-    body.stock !== undefined ? body.stock : row.stock,
     body.active !== undefined ? (body.active ? 1 : 0) : row.active,
     row.id
   );
+  res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
+});
+
+function toApiStockAdjustment(row) {
+  return {
+    id: row.id,
+    productId: row.product_id,
+    productName: row.product_name,
+    beforeKg: row.before_kg,
+    afterKg: row.after_kg,
+    reason: row.reason,
+    note: row.note,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+app.get('/api/stock-adjustments', requireAuth, (req, res) => {
+  const rows = req.query.productId
+    ? db.prepare('SELECT * FROM stock_adjustments WHERE product_id = ? ORDER BY id DESC LIMIT 50').all(String(req.query.productId))
+    : db.prepare('SELECT * FROM stock_adjustments ORDER BY id DESC LIMIT 200').all();
+  res.json({ adjustments: rows.map(toApiStockAdjustment) });
+});
+
+app.post('/api/products/:id/adjust-stock', requireAuth, requireMenu('products'), (req, res) => {
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'ไม่พบสินค้ารายการนี้' });
+  const b = req.body || {};
+  const afterKg = Number(b.newStockKg);
+  if (!(afterKg >= 0) || !Number.isFinite(afterKg)) return res.status(400).json({ error: 'กรุณากรอกสต็อกใหม่เป็นตัวเลข 0 ขึ้นไป' });
+  if (!String(b.reason || '').trim()) return res.status(400).json({ error: 'กรุณาเลือกเหตุผลในการปรับสต็อก' });
+  const beforeKg = parseFloat(String(row.stock).replace(/[^\d.]/g, '')) || 0;
+  db.prepare('UPDATE products SET stock = ? WHERE id = ?').run(`${afterKg.toFixed(2)} กก.`, row.id);
+  db.prepare(
+    'INSERT INTO stock_adjustments (product_id, product_name, before_kg, after_kg, reason, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(row.id, row.name, beforeKg, afterKg, String(b.reason).trim(), String(b.note || '').trim(), req.authUser.username || '');
   res.json({ product: toApiProduct(db.prepare('SELECT * FROM products WHERE id = ?').get(row.id)) });
 });
 

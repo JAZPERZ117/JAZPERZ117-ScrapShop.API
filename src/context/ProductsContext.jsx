@@ -73,8 +73,8 @@ export function ProductsProvider({ children }) {
     return data.product;
   }
 
-  // General patch — active toggle, category reassignment, or a direct stock edit. Price isn't
-  // included here; it goes through updatePrice below so the history/sparkline stay consistent.
+  // General patch — active toggle or category reassignment. Price goes through updatePrice
+  // below (history/sparkline) and manual stock corrections through adjustStock (logged reason).
   async function updateProduct(id, patch) {
     const res = await fetch(`/api/products/${id}`, {
       method: 'PUT',
@@ -187,6 +187,20 @@ export function ProductsProvider({ children }) {
     return true;
   }
 
+  // A manual stock correction (physical count, moisture loss, theft...) — the server logs who,
+  // when, before/after and the reason, unlike the old free-text stock field.
+  async function adjustStock(id, { newStockKg, reason, note }) {
+    const res = await fetch(`/api/products/${id}/adjust-stock`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ newStockKg, reason, note }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'ปรับสต็อกไม่สำเร็จ');
+    setProductsRaw((prev) => ({ ...prev, [id]: data.product }));
+    return data.product;
+  }
+
   // Renaming/deleting a category (see Categories.jsx) cascades onto every product referencing
   // it by name — done atomically server-side, then this just re-syncs the local copy rather
   // than trying to guess which individual rows changed.
@@ -215,6 +229,7 @@ export function ProductsProvider({ children }) {
         addStockById,
         removeStock,
         removeStockByName,
+        adjustStock,
         reassignCategory,
         refresh,
       }}

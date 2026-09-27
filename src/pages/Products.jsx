@@ -17,6 +17,7 @@ import {
 import RowMenu from '../components/RowMenu.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { useCategories } from '../context/CategoriesContext.jsx';
+import StockAdjustPanel from '../components/StockAdjustPanel.jsx';
 import './Products.css';
 
 const dirIcon = { up: IconArrowUpSmall, down: IconArrowDownSmall, flat: IconMinus };
@@ -71,7 +72,6 @@ export default function Products() {
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [priceInput, setPriceInput] = useState(products[order[0]] ? products[order[0]].price.toFixed(2) : '0.00');
-  const [stockInput, setStockInput] = useState(products[order[0]]?.stock || '');
   const [catInput, setCatInput] = useState(products[order[0]]?.cat || categoryNames[0] || 'อื่นๆ');
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState('');
@@ -119,7 +119,6 @@ export default function Products() {
   function selectProduct(id) {
     setSelectedId(id);
     setPriceInput(products[id].price.toFixed(2));
-    setStockInput(products[id].stock);
     setCatInput(products[id].cat);
   }
 
@@ -136,7 +135,7 @@ export default function Products() {
     const newPrice = parsed || p.price;
     try {
       if (parsed) await updatePrice(selectedId, newPrice);
-      await updateProduct(selectedId, { stock: stockInput, cat: catInput });
+      await updateProduct(selectedId, { cat: catInput });
       // If the typed price didn't parse (or was 0), the real price silently stays unchanged —
       // reset the field back to it too, otherwise it keeps showing the rejected text forever
       // while the price hero/table above correctly still show the real, unchanged price.
@@ -167,7 +166,6 @@ export default function Products() {
       const created = await createProduct({ name: newName.trim(), cat, price });
       setSelectedId(created.id);
       setPriceInput(price.toFixed(2));
-      setStockInput(created.stock);
       setCatInput(cat);
       setNewName('');
       setNewPrice('');
@@ -440,9 +438,11 @@ export default function Products() {
               </div>
               <div className="field" style={{ flex: 1 }}>
                 <label>สต็อกคงเหลือ</label>
-                <input className="input-plain" value={stockInput} onChange={(e) => setStockInput(e.target.value)} />
+                <input className="input-plain" value={p.stock} disabled />
               </div>
             </div>
+
+            <StockAdjustPanel product={p} onResult={setBanner} />
 
             <div className="toggle-row">
               <div>
