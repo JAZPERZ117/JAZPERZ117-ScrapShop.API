@@ -44,6 +44,7 @@ export default function Customers() {
   const [newIdNumber, setNewIdNumber] = useState('');
   const [newIdExpiry, setNewIdExpiry] = useState('');
   const [newIdPhoto, setNewIdPhoto] = useState('');
+  const [newAddr, setNewAddr] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
@@ -51,6 +52,7 @@ export default function Customers() {
   const [editIdExpiry, setEditIdExpiry] = useState('');
   const [editIdPhoto, setEditIdPhoto] = useState('');
   const [editTag, setEditTag] = useState('general');
+  const [editAddr, setEditAddr] = useState('');
   const [banner, setBanner] = useState(null);
 
   const rows = useMemo(() => {
@@ -87,8 +89,10 @@ export default function Customers() {
         idNumber: newIdNumber.trim(),
         idExpiry: newIdExpiry,
         idPhoto: newIdPhoto,
+        addr: newAddr.trim(),
       });
       setSelectedId(created.id);
+      setNewAddr('');
       setNewName('');
       setNewPhone('');
       setNewIdNumber('');
@@ -118,6 +122,7 @@ export default function Customers() {
     setEditIdExpiry(target.idExpiry || '');
     setEditIdPhoto(target.idPhoto || '');
     setEditTag(target.tag || 'general');
+    setEditAddr(target.addr && target.addr !== 'ยังไม่ได้บันทึกที่อยู่' ? target.addr : '');
     setEditOpen(true);
   }
 
@@ -131,6 +136,7 @@ export default function Customers() {
         idExpiry: editIdExpiry,
         idPhoto: editIdPhoto,
         tag: editTag,
+        addr: editAddr.trim(),
       });
       setEditOpen(false);
       setBanner({ type: 'success', text: 'บันทึกข้อมูลลูกค้าเรียบร้อยแล้ว' });
@@ -190,6 +196,7 @@ export default function Customers() {
           <input className="input-plain" placeholder="เบอร์โทรศัพท์" value={newPhone} onChange={(e) => setNewPhone(e.target.value)} required />
           <IdPhotoCapture value={newIdPhoto} onChange={setNewIdPhoto} onError={(msg) => setBanner({ type: 'error', text: msg })} />
           <input className="input-plain" placeholder="เลขบัตรประชาชน (ดูจากรูปที่ถ่าย)" value={newIdNumber} onChange={(e) => setNewIdNumber(e.target.value)} />
+          <input className="input-plain" placeholder="ที่อยู่ตามบัตรประชาชน (ไม่บังคับ)" value={newAddr} onChange={(e) => setNewAddr(e.target.value)} />
           <div className="field">
             <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>วันหมดอายุบัตรประชาชน</label>
             <input className="input-plain" type="date" value={newIdExpiry} onChange={(e) => setNewIdExpiry(e.target.value)} />
@@ -443,6 +450,7 @@ export default function Customers() {
                 <input className="input-plain" placeholder="เบอร์โทรศัพท์" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
                 <IdPhotoCapture value={editIdPhoto} onChange={setEditIdPhoto} onError={(msg) => setBanner({ type: 'error', text: msg })} />
                 <input className="input-plain" placeholder="เลขบัตรประชาชน (ดูจากรูปที่ถ่าย)" value={editIdNumber} onChange={(e) => setEditIdNumber(e.target.value)} />
+                <input className="input-plain" placeholder="ที่อยู่ตามบัตรประชาชน" value={editAddr} onChange={(e) => setEditAddr(e.target.value)} />
                 <div className="field">
                   <label style={{ fontSize: 12, color: 'var(--ink-500)' }}>วันหมดอายุบัตรประชาชน</label>
                   <input className="input-plain" type="date" value={editIdExpiry} onChange={(e) => setEditIdExpiry(e.target.value)} />

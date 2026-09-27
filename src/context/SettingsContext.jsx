@@ -12,6 +12,7 @@ export const INITIAL_SETTINGS = {
   receiptFooter: 'ขอบคุณที่ใช้บริการ · โปรดเก็บใบเสร็จไว้เป็นหลักฐาน',
   remember30: true,
   pinLogin: true,
+  requireSeller: false,
 };
 
 function authHeaders() {
