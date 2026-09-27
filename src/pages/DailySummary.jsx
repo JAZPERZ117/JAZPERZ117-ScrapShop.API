@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { IconBarChart, IconDownload, IconPrint, IconCategory, IconCash, IconClockHistory } from '../icons.jsx';
 import { exportCsv } from '../lib/csvExport.js';
 import { useReceipts } from '../context/ReceiptsContext.jsx';
@@ -6,6 +6,8 @@ import { useCustomers } from '../context/CustomersContext.jsx';
 import { useProducts } from '../context/ProductsContext.jsx';
 import { usePayroll } from '../context/PayrollContext.jsx';
 import { useSettings } from '../context/SettingsContext.jsx';
+import { useDeliveries } from '../context/DeliveriesContext.jsx';
+import { sumSales, signedMoney } from '../lib/finance.js';
 import './DailySummary.css';
 
 function parseMoney(s) {
@@ -62,14 +64,18 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function isToday(isoDateTime) {
-  if (!isoDateTime) return false;
+// Local-date key (not toISOString, which shifts to UTC) for comparing a full timestamp
+// (customer createdAt, payroll paidAt) against the selected YYYY-MM-DD day.
+function localDateKey(isoDateTime) {
+  if (!isoDateTime) return '';
   const d = new Date(isoDateTime);
-  const t = new Date();
-  return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-const TODAY_THAI_LONG = new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+function thaiLongDate(dateKey) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  return new Intl.DateTimeFormat('th-TH-u-ca-buddhist', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(y, m - 1, d));
+}
 
 export default function DailySummary() {
   const { receipts, order: receiptOrder } = useReceipts();
@@ -77,20 +83,28 @@ export default function DailySummary() {
   const { products } = useProducts();
   const { payHistory } = usePayroll();
   const { settings } = useSettings();
+  const { deliveries, order: deliveryOrder } = useDeliveries();
+  const [selectedDate, setSelectedDate] = useState(todayISO);
+  const dateLabel = thaiLongDate(selectedDate);
 
-  const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void' && receipts[id].date === todayISO());
-  const newCustomerIds = customerOrder.filter((id) => isToday(customers[id].createdAt));
+  const activeReceipts = receiptOrder.filter((id) => receipts[id].status !== 'void' && receipts[id].date === selectedDate);
+  const newCustomerIds = customerOrder.filter((id) => localDateKey(customers[id].createdAt) === selectedDate);
 
   const totalToday = activeReceipts.reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
   const totalWeightToday = activeReceipts.reduce((sum, id) => sum + parseWeightKg(receipts[id].weight), 0);
+  const salesToday = sumSales(deliveries, deliveryOrder, (date) => date === selectedDate);
+  const wagesPaidToday = payHistory.filter((p) => localDateKey(p.paidAt) === selectedDate).reduce((sum, p) => sum + (p.net || 0), 0);
+  const grossProfitToday = salesToday - totalToday - wagesPaidToday;
 
+  // Both of these are money going OUT of the drawer, so the day's cash outflow is their sum —
+  // it used to subtract one from the other, which doesn't correspond to any real cash figure.
   const cashFromPurchases = activeReceipts
     .filter((id) => receipts[id].method === 'เงินสด')
     .reduce((sum, id) => sum + parseMoney(receipts[id].total), 0);
   const cashPaidToStaff = payHistory
-    .filter((p) => p.payMethod === 'cash' && isToday(p.paidAt))
+    .filter((p) => p.payMethod === 'cash' && localDateKey(p.paidAt) === selectedDate)
     .reduce((sum, p) => sum + (p.net || 0), 0);
-  const netCash = cashFromPurchases - cashPaidToStaff;
+  const cashOut = cashFromPurchases + cashPaidToStaff;
 
   // Hour-of-day buckets computed from each receipt's real recorded time.
   const hourBuckets = useMemo(() => {
@@ -155,10 +169,16 @@ export default function DailySummary() {
           <div className="page-sub">ภาพรวมการรับซื้อ กำไร และเงินสดประจำวันที่เลือก</div>
         </div>
         <div className="head-actions">
-          <div className="date-select">
+          <label className="date-select" style={{ cursor: 'pointer' }}>
             <IconClockHistory />
-            {TODAY_THAI_LONG}
-          </div>
+            <input
+              type="date"
+              value={selectedDate}
+              max={todayISO()}
+              onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+              style={{ border: 'none', background: 'transparent', font: 'inherit', color: 'inherit', padding: 0, cursor: 'pointer' }}
+            />
+          </label>
           <button type="button" className="btn btn-ghost" onClick={handleExport}>
             <IconDownload />
             ส่งออก Excel
@@ -212,10 +232,10 @@ export default function DailySummary() {
             <IconBarChart />
           </div>
           <div>
-            <div className="stat-label">เงินสดสุทธิวันนี้</div>
-            <div className="stat-value">{money(netCash)}</div>
+            <div className="stat-label">กำไรขั้นต้นวันนี้</div>
+            <div className="stat-value" style={{ color: grossProfitToday < 0 ? 'var(--rose)' : undefined }}>{signedMoney(grossProfitToday)}</div>
             <div className="stat-foot" style={{ color: 'var(--ink-500)' }}>
-              รับซื้อเงินสด − จ่ายเงินเดือนเงินสด
+              ขาย {money(salesToday)} − รับซื้อ − ค่าแรง
             </div>
           </div>
         </div>
@@ -304,7 +324,7 @@ export default function DailySummary() {
           <div className="card card-pad">
             <div className="card-title" style={{ marginBottom: 14 }}>
               <IconCash />
-              กระทบยอดเงินสด
+              เงินสดจ่ายออก
             </div>
             <div className="sum-row">
               <span className="label">รับซื้อของด้วยเงินสด</span>
@@ -315,8 +335,8 @@ export default function DailySummary() {
               <span className="val minus">−{money(cashPaidToStaff)}</span>
             </div>
             <div className="grand-total">
-              <span className="label">เงินสดสุทธิ</span>
-              <span className="val">{money(netCash)}</span>
+              <span className="label">รวมเงินสดจ่ายออก</span>
+              <span className="val">−{money(cashOut)}</span>
             </div>
           </div>
 
@@ -350,7 +370,7 @@ export default function DailySummary() {
               <br />
               โทร. {settings.phone} &nbsp;|&nbsp; เลขผู้เสียภาษี {settings.taxId}
             </div>
-            <div className="a4-doc-title">สรุปยอดประจำวัน · {TODAY_THAI_LONG}</div>
+            <div className="a4-doc-title">สรุปยอดประจำวัน · {dateLabel}</div>
           </div>
           <hr className="a4-doc-divider" />
 
@@ -404,16 +424,24 @@ export default function DailySummary() {
 
           <div className="a4-doc-summary">
             <div className="a4-doc-sum-row">
+              <span>ยอดขายให้ผู้รับซื้อ</span>
+              <b>{money(salesToday)}</b>
+            </div>
+            <div className="a4-doc-sum-row">
+              <span>กำไรขั้นต้น (ขาย − รับซื้อ − ค่าแรง)</span>
+              <b>{signedMoney(grossProfitToday)}</b>
+            </div>
+            <div className="a4-doc-sum-row minus">
               <span>รับซื้อของด้วยเงินสด</span>
-              <b>{money(cashFromPurchases)}</b>
+              <b>−{money(cashFromPurchases)}</b>
             </div>
             <div className="a4-doc-sum-row minus">
               <span>จ่ายเงินเดือนด้วยเงินสด</span>
               <b>−{money(cashPaidToStaff)}</b>
             </div>
             <div className="a4-doc-grand">
-              <span>เงินสดสุทธิ</span>
-              <span>{money(netCash)}</span>
+              <span>รวมเงินสดจ่ายออก</span>
+              <span>−{money(cashOut)}</span>
             </div>
           </div>
 
