@@ -84,6 +84,9 @@ app.post('/api/login', authLimiter, (req, res) => {
   if (!user || !user.password_hash || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: 'ชื่อผู้ใช้งานหรือรหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง' });
   }
+  if (!user.active) {
+    return res.status(403).json({ error: 'บัญชีนี้ถูกปิดใช้งาน — ติดต่อเจ้าของร้าน' });
+  }
 
   // "จดจำการเข้าสู่ระบบ 30 วัน" kept the session in localStorage for 30 days, but the token
   // itself always expired after 8h — past that, every API call 401'd while the UI still looked
@@ -130,12 +133,22 @@ function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'ไม่ได้เข้าสู่ระบบ' });
+  let payload;
   try {
-    req.authUser = jwt.verify(token, JWT_SECRET);
-    next();
+    payload = jwt.verify(token, JWT_SECRET);
   } catch {
-    res.status(401).json({ error: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' });
+    return res.status(401).json({ error: 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่' });
   }
+  // A signed token alone used to be enough for its whole lifetime (up to 30 days), so an account
+  // the owner had deactivated or deleted — or demoted to a lesser role — kept its old access
+  // until the token expired. Re-check the account on every request and take the role from the
+  // database, not from the token.
+  const user = db.prepare('SELECT id, username, role, active FROM users WHERE id = ?').get(payload.sub);
+  if (!user || !user.active) {
+    return res.status(401).json({ error: 'บัญชีนี้ถูกปิดใช้งานหรือถูกลบแล้ว กรุณาเข้าสู่ระบบใหม่' });
+  }
+  req.authUser = { ...payload, username: user.username, role: user.role };
+  next();
 }
 
 // Only the real admin login (POST /api/login) issues a JWT signed with role "owner" — PIN
