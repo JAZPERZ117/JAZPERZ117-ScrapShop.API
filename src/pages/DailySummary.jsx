@@ -9,6 +9,7 @@ import { useSettings } from '../context/SettingsContext.jsx';
 import { useDeliveries } from '../context/DeliveriesContext.jsx';
 import { useExpenses } from '../context/ExpensesContext.jsx';
 import { sumSales, sumExpenses, signedMoney } from '../lib/finance.js';
+import CashDrawerCount from '../components/CashDrawerCount.jsx';
 import './DailySummary.css';
 
 function parseMoney(s) {
@@ -330,6 +331,8 @@ export default function DailySummary() {
         </div>
 
         <div className="summary-sticky">
+          <CashDrawerCount date={selectedDate} netCash={netCash} />
+
           <div className="card card-pad">
             <div className="card-title" style={{ marginBottom: 14 }}>
               <IconCash />

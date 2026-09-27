@@ -344,4 +344,18 @@ db.exec(`
   );
 `);
 
+// One row per day: the cash float put in the drawer when the shop opens and the cash actually
+// counted at close. The expected amount isn't stored — it's derived from that day's cash
+// in/out (see DailySummary.jsx), so it stays right even if a receipt is voided afterward.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS cash_counts (
+    date TEXT PRIMARY KEY,
+    opening_float REAL NOT NULL DEFAULT 0,
+    counted_cash REAL,
+    note TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
 module.exports = db;
